@@ -1,6 +1,6 @@
 {
-  "name": "Tuya Custom",
+  "name": "RS-WFIREX4",
   "content_in_root": false,
-  "domains": ["sensor"],
-  "iot_class": "cloud_poll"
+  "domains": ["sensor", "remote"],
+  "iot_class": "Local Push"
 }
