@@ -294,6 +294,7 @@ class Wfirex4Remote(RemoteEntity):
 
             reader, writer = await asyncio.open_connection(self._host, self._port)
             writer.write(b'\xaa\x00\x01\x12\x6c')
+            await writer.drain()
 
             self.hass.components.persistent_notification.async_create(
                 f"Press the '{command}' button.",
@@ -308,6 +309,7 @@ class Wfirex4Remote(RemoteEntity):
                     break
                 data += msg
             writer.close()
+            await writer.wait_closed()
 
             self.hass.components.persistent_notification.async_dismiss(
                 notification_id="learn_command"
@@ -316,7 +318,7 @@ class Wfirex4Remote(RemoteEntity):
             if (data and data[0:1] == b'\xAA'):
                 code = data.hex()[16:]
                 self._last_learn = code
-                return self._last_learn
+                return code
             else:
                 raise Exception('Did not get the correct response.')
 
