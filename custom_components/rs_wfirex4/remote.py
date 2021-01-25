@@ -1,64 +1,107 @@
 """RS-WFIREX4 Remote platform that has a remotes."""
+import re
 import socket
 import asyncio
 import voluptuous as vol
 import homeassistant.helpers.config_validation as cv
 
+from base64 import b64decode
+from collections import defaultdict
+from itertools import product
+from homeassistant.core import callback
 from homeassistant.const import CONF_HOST, CONF_NAME
-
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.components.remote import (
     PLATFORM_SCHEMA,
+    ATTR_ALTERNATIVE,
+    ATTR_COMMAND,
+    ATTR_DEVICE,
+    ATTR_DELAY_SECS,
+    ATTR_NUM_REPEATS,
+    DEFAULT_DELAY_SECS,
     SUPPORT_LEARN_COMMAND,
     RemoteEntity,
 )
 
+from homeassistant.helpers.storage import Store
+
 import logging
 
 DEFAULT_NAME = 'RS-WFIREX4'
+
+CODE_STORAGE_VERSION = 1
+FLAG_STORAGE_VERSION = 1
+FLAG_SAVE_DELAY = 15
 
 PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
     vol.Required(CONF_HOST): cv.string,
     vol.Optional(CONF_NAME, default=DEFAULT_NAME): cv.string,
 })
 
+COMMAND_SCHEMA = vol.Schema(
+    {
+        vol.Required(ATTR_COMMAND): vol.All(
+            cv.ensure_list, [vol.All(cv.string, vol.Length(min=1))], vol.Length(min=1)
+        ),
+    },
+    extra=vol.ALLOW_EXTRA,
+)
+
+SERVICE_SEND_SCHEMA = COMMAND_SCHEMA.extend(
+    {
+        vol.Optional(ATTR_DEVICE): vol.All(cv.string, vol.Length(min=1)),
+        vol.Optional(ATTR_DELAY_SECS, default=DEFAULT_DELAY_SECS): vol.Coerce(float),
+    }
+)
+
+SERVICE_LEARN_SCHEMA = COMMAND_SCHEMA.extend(
+    {
+        vol.Required(ATTR_DEVICE): vol.All(cv.string, vol.Length(min=1)),
+        vol.Optional(ATTR_ALTERNATIVE, default=False): cv.boolean,
+    }
+)
+
 _LOGGER = logging.getLogger(__name__)
 
-async def async_setup_entry(hass, config_entry, async_add_entities):
-    """Set up the Demo config entry."""
-    setup_platform(hass, {}, async_add_entities)
-
-
-def setup_platform(hass, config, add_entities_callback, discovery_info=None):
-    """Set up the demo remotes."""
+async def async_setup_platform(hass, config, async_add_entities, discovery_info=None):
+    """Set up the RS-WFIREX4 remote."""
     host = config.get(CONF_HOST)
     name = config.get(CONF_NAME)
-    port = 60001
+    uid = host.split('.')[3]
 
-    add_entities_callback(
-        [
-            Wfirex4Remote(name, True, "mdi:remote", host),
-        ]
+    remote = Wfirex4Remote(name, host, uid,
+        Store(hass, CODE_STORAGE_VERSION, f"rs_wfirex4_codes"),
+        Store(hass, FLAG_STORAGE_VERSION, f"rs_wfirex4_{uid}_flags"),
     )
+
+    async_add_entities([remote])
+
+    loaded = await remote.async_load_storage_files()
 
 
 class Wfirex4Remote(RemoteEntity):
-    """Representation of a demo remote."""
+    """Representation of a RS-WFIREX4 remote."""
 
-    def __init__(self, name, state, icon, host):
-        """Initialize the Demo Remote."""
+    def __init__(self, name, host, uid, code, flag):
+        """Initialize the RS-WFIREX4 Remote."""
         self._name = name or DEFAULT_NAME
-        self._state = state
-        self._icon = icon
+        self._icon = 'mdi:remote'
         self._last_command_sent = None
         self._last_command_result = None
         self._last_learn = None
         self._host = host
         self._port = 60001
-        self._uid = host.split('.')[3]
+        self._uid = uid
+        self._code_storege = code
+        self._flag_storage = flag
+        self._codes = {}
+        self._flags = defaultdict(int)
+        self._state = True
+        self._codeRegx = re.compile(r'^[0-9a-f]{32,}$')
 
     @property
     def should_poll(self):
-        """No polling needed for a demo remote."""
+        """No polling needed for a RS-WFIREX4 remote."""
         return False
 
     @property
@@ -110,18 +153,113 @@ class Wfirex4Remote(RemoteEntity):
         self._state = False
         self.schedule_update_ha_state()
 
-    #def send_command(self, command, **kwargs):
+    def get_code(self, command, device):
+        """Get Hex code"""
+        def data_packet(value):
+            """Decode a data packet given for a Broadlink remote."""
+            value = cv.string(value)
+            extra = len(value) % 4
+            if extra > 0:
+                value = value + ("=" * (4 - extra))
+            return b64decode(value)
+
+        if command.startswith("b64:"):
+            try:
+                code, is_toggle_cmd = data_packet(command[4:]).hex(), False
+            except ValueError as err:
+                raise ValueError("Invalid code") from err
+
+        elif self._codeRegx.match(command):
+            code, is_toggle_cmd = command, False
+
+        else:
+            if device is None:
+                raise KeyError("You need to specify a device")
+
+            try:
+                code = self._codes[device][command]
+            except KeyError as err:
+                raise KeyError("Command not found") from err
+
+            # For toggle commands, alternate between codes in a list.
+            if isinstance(code, list):
+                code = code[self._flags[device]]
+                is_toggle_cmd = True
+            else:
+                is_toggle_cmd = False
+
+        return code, is_toggle_cmd
+
+    @callback
+    def get_flags(self):
+        """Return a dictionary of toggle flags.
+
+        A toggle flag indicates whether the remote should send an
+        alternative code.
+        """
+        return self._flags
+
+    async def async_load_storage_files(self):
+        """Load codes and toggle flags from storage files."""
+        try:
+            self._codes.update(await self._code_storege.async_load() or {})
+        except HomeAssistantError:
+            _LOGGER.error("Failed to create '%s Remote' entity: Storage error", "{} {}".format(self._name, 'Remote'))
+            self._code_storege = None
+
     async def async_send_command(self, command, **kwargs):
-        """Send a command to a device."""
-        for com in command:
-            self._last_command_sent = com
-            await self.set_wfirex(com)
-        self.schedule_update_ha_state()
+        """Send a list of commands to a device."""
+        kwargs[ATTR_COMMAND] = command
+        kwargs = SERVICE_SEND_SCHEMA(kwargs)
+        commands = kwargs[ATTR_COMMAND]
+        device = kwargs.get(ATTR_DEVICE)
+        repeat = kwargs[ATTR_NUM_REPEATS]
+        delay = kwargs[ATTR_DELAY_SECS]
+
+        last_code = ''
+
+        if not self._state:
+            _LOGGER.warning(
+                "remote.send_command canceled: %s entity is turned off", self.entity_id
+            )
+            return
+
+        should_delay = False
+
+        for _, cmd in product(range(repeat), commands):
+            if should_delay:
+                await asyncio.sleep(delay)
+
+            try:
+                code, is_toggle_cmd = self.get_code(cmd, device)
+
+            except (KeyError, ValueError) as err:
+                _LOGGER.error("Failed to send '%s' to %s: %s", cmd, device, err)
+                should_delay = False
+                continue
+
+            try:
+                await self.set_wfirex(code)
+                last_code = code
+
+            except:
+                # @todo
+                continue
+
+            should_delay = True
+            if is_toggle_cmd:
+                self._flags[device] ^= 1
+
+        self._flag_storage.async_delay_save(self.get_flags, FLAG_SAVE_DELAY)
+
+        if last_code:
+            self._last_command_sent = last_code
+            self.schedule_update_ha_state()
 
     async def async_learn_command(self, **kwargs):
         """Learn a command to a device."""
-        await self.learn_wfirex()
-        self.schedule_update_ha_state()
+        if await self.learn_wfirex(**kwargs):
+            self.schedule_update_ha_state()
 
     async def set_wfirex(self, wave_data_str):
 
@@ -141,38 +279,71 @@ class Wfirex4Remote(RemoteEntity):
         writer.write(send_data)
         data = await reader.read(1024)
         writer.close()
-        #with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        #    s.connect((self._host, self._port))
-        #    s.sendall(send_data)
-        #    data = s.recv(1024)
-        #    s.close()
 
         if data:
             self._last_command_result = data.hex()
 
-    async def learn_wfirex(self):
-        #with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        #    s.connect((self._host, self._port))
-        #    s.settimeout(30)
-        #    s.sendall(b'\xaa\x00\x01\x12\x6c')
-        #    data = b''
-        #    while True:
-        #        msg = s.recv(1024)
-        #        if len(msg) <= 0:
-        #            break
-        #        data += msg
-        #    s.close()
-        reader, writer = await asyncio.open_connection(self._host, self._port)
-        writer.write(b'\xaa\x00\x01\x12\x6c')
-        data = b''
-        while True:
-            msg = await reader.read(1024)
-            if len(msg) <= 0:
-                break
-            data += msg
-        writer.close()
+    async def learn_wfirex(self, **kwargs):
+        """Learn a list of commands from a remote."""
+        kwargs = SERVICE_LEARN_SCHEMA(kwargs)
+        commands = kwargs[ATTR_COMMAND]
+        device = kwargs[ATTR_DEVICE]
+        toggle = kwargs[ATTR_ALTERNATIVE]
 
-        self._last_learn = data.hex()[16:]
+        async def learn_command(command):
+
+            reader, writer = await asyncio.open_connection(self._host, self._port)
+            writer.write(b'\xaa\x00\x01\x12\x6c')
+
+            self.hass.components.persistent_notification.async_create(
+                f"Press the '{command}' button.",
+                title="Learn command",
+                notification_id="learn_command",
+            )
+
+            data = b''
+            while True:
+                msg = await reader.read(1024)
+                if len(msg) <= 0:
+                    break
+                data += msg
+            writer.close()
+
+            self.hass.components.persistent_notification.async_dismiss(
+                notification_id="learn_command"
+            )
+
+            if (data and data[0:1] == b'\xAA'):
+                code = data.hex()[16:]
+                self._last_learn = code
+                return self._last_learn
+            else:
+                raise Exception('Did not get the correct response.')
+
+        if not self._state:
+            _LOGGER.warning(
+                "remote.learn_command canceled: %s entity is turned off", self.entity_id
+            )
+            return False
+
+        should_store = False
+
+        for command in commands:
+            try:
+                code = await learn_command(command)
+                if toggle:
+                    code = [code, await learn_command(command)]
+
+                self._codes.setdefault(device, {}).update({command: code})
+                should_store = True
+            except Exception as err:
+                _LOGGER.error("Failed to learn '%s': %s", command, err)
+                continue
+
+        if (self._code_storege and should_store):
+            await self._code_storege.async_save(self._codes)
+
+        return True
 
     def crc8_calc(self, payload_buf): 
         CRC8Table = [
