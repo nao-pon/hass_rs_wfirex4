@@ -27,7 +27,7 @@ from homeassistant.helpers.storage import Store
 
 import logging
 
-DEFAULT_NAME = 'RS-WFIREX4'
+from . import DOMAIN, DEFAULT_NAME
 
 CODE_STORAGE_VERSION = 1
 FLAG_STORAGE_VERSION = 1
@@ -63,11 +63,14 @@ SERVICE_LEARN_SCHEMA = COMMAND_SCHEMA.extend(
 
 _LOGGER = logging.getLogger(__name__)
 
-async def async_setup_platform(hass, config, async_add_entities, discovery_info=None):
+async def async_setup_platform(hass, configs, async_add_entities, config=None):
     """Set up the RS-WFIREX4 remote."""
+    if config == None:
+        return False
+
     host = config.get(CONF_HOST)
     name = config.get(CONF_NAME)
-    uid = host.split('.')[3]
+    uid = config.get('uid')
 
     remote = Wfirex4Remote(name, host, uid,
         Store(hass, CODE_STORAGE_VERSION, f"rs_wfirex4_codes"),
@@ -277,8 +280,10 @@ class Wfirex4Remote(RemoteEntity):
 
         reader, writer = await asyncio.open_connection(self._host, self._port)
         writer.write(send_data)
+        await writer.drain()
         data = await reader.read(1024)
         writer.close()
+        await writer.wait_closed()
 
         if data:
             self._last_command_result = data.hex()

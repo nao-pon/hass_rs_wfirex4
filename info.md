@@ -19,19 +19,16 @@ In other words, the configuration directory of homeassistant is where the config
 
 ### Entity parameters (configuration.yaml)
 
-- For sensors entity:
 ```
-sensor:
-  - platform: rs_wfirex4
-    host: "xxx.xxx.xxx.xxx" # IP address of your RS-WFIREX4
-    name: "Living sensors"  # Optional
-```
+rs_wfirex4:
+  - host: "xxx.xxx.xxx.xxx" # IP address of your first RS-WFIREX4
+    name: "Living Wfirex4"  # Optional entity name
+    scan_interval: 30       # Optional seconds of scan interval (Default 60)
 
-- For remote entity:
+  - host: "xxx.xxx.xxx.xxx" # IP address of your second RS-WFIREX4
+    name: "Living Wfirex4"  # Optional entity name
+    scan_interval: 30       # Optional seconds of scan interval (Default 60)
 ```
-remote:
-  - platform: rs_wfirex4
-    host: "xxx.xxx.xxx.xxx"         # IP address of your RS-WFIREX4
-    name: "Living remote commander" # Optional
-```
+You can find entities that four sensors and one remote.
+
 This remote entity can be used in much the same way as [Broadlink's remote](https://www.home-assistant.io/integrations/broadlink/#remote) entity.

@@ -26,7 +26,7 @@ import random
 
 # ------------------------------------------------------------------------------
 # Config
-DEFAULT_NAME = 'RS-WFIREX4'
+from . import DOMAIN, DEFAULT_NAME
 CONF_ATTRIBUTION = ""
 
 # Data fetch interval
@@ -51,11 +51,15 @@ _LOGGER = logging.getLogger(__name__)
 
 # ------------------------------------------------------------------------------
 # Setup Entities
-async def async_setup_platform(hass, config, async_add_entities, discovery_info=None):
+async def async_setup_platform(hass, configs, async_add_entities, config=None):
+    """Representation of a RS-WFIREX4 sensors."""
+    if config == None:
+        return False
+
     host = config.get(CONF_HOST)
     name = config.get(CONF_NAME)
     intv = config.get(CONF_SCAN_INTERVAL)
-    uid = host.split('.')[3]
+    uid = config.get('uid')
 
     entities = []
     for sensor_type in SENSOR_TYPES.keys():
@@ -177,6 +181,7 @@ class Wfirex4Fetcher:
         try:
             reader, writer = await asyncio.wait_for(con, timeout=10)
             writer.write(b'\xAA\x00\x01\x18\x50')
+            await writer.drain()
             data = b''
             while True:
                 msg = await reader.read(1024)
@@ -184,6 +189,7 @@ class Wfirex4Fetcher:
                     break
                 data += msg
             writer.close()
+            await writer.wait_closed()
 
         except :
             raise
