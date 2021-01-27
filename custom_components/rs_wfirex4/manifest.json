@@ -1,8 +1,8 @@
 {
   "domain": "rs_wfirex4",
   "name": "RS-WFIREX4",
-  "documentation": "",
+  "documentation": "https://github.com/nao-pon/hass_rs_wfirex4",
   "dependencies": [],
-  "codeowners": [],
+  "codeowners": ["@nao-pon"],
   "requirements": []
 }
