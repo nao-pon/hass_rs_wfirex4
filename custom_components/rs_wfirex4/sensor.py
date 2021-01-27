@@ -12,9 +12,9 @@ from homeassistant.components.sensor import (
     DEVICE_CLASS_HUMIDITY,
     DEVICE_CLASS_ILLUMINANCE,
     DEVICE_CLASS_TEMPERATURE,
-    DEVICE_CLASS_SIGNAL_STRENGTH,
+    DEVICE_CLASS_POWER_FACTOR,
 )
-from homeassistant.const import CONF_MONITORED_CONDITIONS, ATTR_ATTRIBUTION, CONF_HOST, CONF_NAME, CONF_SCAN_INTERVAL, PERCENTAGE, TEMP_CELSIUS, LIGHT_LUX
+from homeassistant.const import ATTR_ATTRIBUTION, CONF_HOST, CONF_NAME, CONF_SCAN_INTERVAL, PERCENTAGE, TEMP_CELSIUS, LIGHT_LUX
 
 from homeassistant.helpers.entity import Entity
 from homeassistant.helpers.event import async_call_later
@@ -33,7 +33,7 @@ SENSOR_TYPES = {
     "temperature": ("Temperature", TEMP_CELSIUS, DEVICE_CLASS_TEMPERATURE),
     "humidity": ("Humidity", PERCENTAGE, DEVICE_CLASS_HUMIDITY),
     "light": ("Light", LIGHT_LUX, DEVICE_CLASS_ILLUMINANCE),
-    "reliability": ("Reliability", PERCENTAGE, DEVICE_CLASS_SIGNAL_STRENGTH),
+    "reliability": ("Reliability", PERCENTAGE, DEVICE_CLASS_POWER_FACTOR),
 }
 
 _LOGGER = logging.getLogger(__name__)
@@ -70,13 +70,11 @@ class Wfirex4SensorEntity(Entity):
         self.client_name = name
         self._state = None
         self.type = sensor_type
-        self._name = SENSOR_TYPES[sensor_type][0]
-        self._unit_of_measurement = SENSOR_TYPES[sensor_type][1]
         self._uid = uid
 
     @property
     def name(self):
-        return '{} {}'.format(self.client_name, self._name)
+        return '{} {}'.format(self.client_name, SENSOR_TYPES[self.type][0])
 
     @property
     def unique_id(self):
@@ -91,6 +89,10 @@ class Wfirex4SensorEntity(Entity):
         return False
 
     @property
+    def device_class(self):
+        return SENSOR_TYPES[self.type][2]
+
+    @property
     def device_state_attributes(self):
         return {
             ATTR_ATTRIBUTION: CONF_ATTRIBUTION,
@@ -98,7 +100,7 @@ class Wfirex4SensorEntity(Entity):
 
     @property
     def unit_of_measurement(self):
-        return self._unit_of_measurement
+        return SENSOR_TYPES[self.type][1]
 
 # ------------------------------------------------------------------------------
 # Fetcher Class
