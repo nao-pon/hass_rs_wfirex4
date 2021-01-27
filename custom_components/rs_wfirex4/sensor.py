@@ -13,7 +13,6 @@ from homeassistant.components.sensor import (
     DEVICE_CLASS_ILLUMINANCE,
     DEVICE_CLASS_TEMPERATURE,
     DEVICE_CLASS_SIGNAL_STRENGTH,
-    PLATFORM_SCHEMA,
 )
 from homeassistant.const import CONF_MONITORED_CONDITIONS, ATTR_ATTRIBUTION, CONF_HOST, CONF_NAME, CONF_SCAN_INTERVAL, PERCENTAGE, TEMP_CELSIUS, LIGHT_LUX
 
@@ -26,11 +25,8 @@ import random
 
 # ------------------------------------------------------------------------------
 # Config
-from . import DOMAIN, DEFAULT_NAME
+from . import DOMAIN, DEFAULT_NAME, DEFAULT_SCAN_INTERVAL
 CONF_ATTRIBUTION = ""
-
-# Data fetch interval
-DEFAULT_SCAN_INTERVAL = 60;
 
 # Sensor type list
 SENSOR_TYPES = {
@@ -39,13 +35,6 @@ SENSOR_TYPES = {
     "light": ("Light", LIGHT_LUX, DEVICE_CLASS_ILLUMINANCE),
     "reliability": ("Reliability", PERCENTAGE, DEVICE_CLASS_SIGNAL_STRENGTH),
 }
-
-# Config Schema
-PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
-    vol.Required(CONF_HOST): cv.string,
-    vol.Optional(CONF_NAME, default=DEFAULT_NAME): cv.string,
-    vol.Optional(CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL): cv.positive_int,
-})
 
 _LOGGER = logging.getLogger(__name__)
 

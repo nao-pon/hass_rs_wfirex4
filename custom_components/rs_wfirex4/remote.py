@@ -12,7 +12,6 @@ from homeassistant.core import callback
 from homeassistant.const import CONF_HOST, CONF_NAME
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.components.remote import (
-    PLATFORM_SCHEMA,
     ATTR_ALTERNATIVE,
     ATTR_COMMAND,
     ATTR_DEVICE,
@@ -32,11 +31,6 @@ from . import DOMAIN, DEFAULT_NAME
 CODE_STORAGE_VERSION = 1
 FLAG_STORAGE_VERSION = 1
 FLAG_SAVE_DELAY = 15
-
-PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
-    vol.Required(CONF_HOST): cv.string,
-    vol.Optional(CONF_NAME, default=DEFAULT_NAME): cv.string,
-})
 
 COMMAND_SCHEMA = vol.Schema(
     {

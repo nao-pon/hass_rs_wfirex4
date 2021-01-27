@@ -13,19 +13,15 @@ DEFAULT_NAME = 'RS-WFIREX4'
 DEFAULT_SCAN_INTERVAL = 60
 PLATFORMS = ['remote', 'sensor']
 
-CONFIG_SCHEMA = vol.Schema(
-    {
-        DOMAIN: vol.Schema([
-            {
-                vol.Required(CONF_HOST): cv.string,
-                vol.Optional(CONF_NAME, default=DEFAULT_NAME): cv.string,
-                vol.Optional(CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL): cv.positive_int,
-            },
-
-        ], extra=vol.ALLOW_EXTRA)
-    },
-    extra=vol.ALLOW_EXTRA
-)
+CONFIG_SCHEMA = vol.Schema({
+    DOMAIN: vol.Schema([
+        vol.Schema({
+            vol.Required(CONF_HOST): cv.string,
+            vol.Optional(CONF_NAME, default=DEFAULT_NAME): cv.string,
+            vol.Optional(CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL): cv.positive_int,
+        }),
+    ])
+}, extra=vol.ALLOW_EXTRA)
 
 async def async_setup(hass, configs):
     for config in configs.get(DOMAIN):
