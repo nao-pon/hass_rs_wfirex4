@@ -4,5 +4,6 @@
   "documentation": "https://github.com/nao-pon/hass_rs_wfirex4",
   "dependencies": [],
   "codeowners": ["@nao-pon"],
-  "requirements": []
+  "requirements": [],
+  "version": "0.1.0"
 }
