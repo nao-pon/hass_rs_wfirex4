@@ -118,7 +118,7 @@ class Wfirex4Fetcher:
         def try_again(err: str):
             # Retry
             secs = random.randint(30, 60)
-            _LOGGER.error("Retrying in %i seconds: %s", minutes, err)
+            _LOGGER.error("Retrying in %i seconds: %s", secs, err)
             async_call_later(self.hass, secs, self.fetching_data)
 
         try:
