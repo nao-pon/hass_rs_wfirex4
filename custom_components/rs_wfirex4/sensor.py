@@ -25,7 +25,7 @@ import random
 
 # ------------------------------------------------------------------------------
 # Config
-from . import DOMAIN, DEFAULT_NAME, DEFAULT_SCAN_INTERVAL
+from . import DOMAIN, DEFAULT_NAME, DEFAULT_SCAN_INTERVAL, CONF_TEMP_OFFSET, CONF_HUMI_OFFSET
 CONF_ATTRIBUTION = ""
 
 # Sensor type list
@@ -47,7 +47,6 @@ async def async_setup_platform(hass, configs, async_add_entities, config=None):
 
     host = config.get(CONF_HOST)
     name = config.get(CONF_NAME)
-    intv = config.get(CONF_SCAN_INTERVAL)
     uid = config.get('uid')
 
     entities = []
@@ -58,7 +57,7 @@ async def async_setup_platform(hass, configs, async_add_entities, config=None):
 
     # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
     # Class of Data fetcher
-    fetcher = Wfirex4Fetcher(hass, host, entities, intv)
+    fetcher = Wfirex4Fetcher(hass, host, entities, config)
 
     # Call first task and start loop
     await fetcher.fetching_data()
@@ -105,13 +104,15 @@ class Wfirex4SensorEntity(Entity):
 # ------------------------------------------------------------------------------
 # Fetcher Class
 class Wfirex4Fetcher:
-    def __init__(self, hass, host, entities, intv):
+    def __init__(self, hass, host, entities, config):
         self.data = {}
         self.hass = hass
         self.entities = entities
         self._host = host
         self._port = 60001
-        self._interval = intv
+        self._interval = config.get(CONF_SCAN_INTERVAL)
+        self._temp_offset = config.get(CONF_TEMP_OFFSET)
+        self._humi_offset = config.get(CONF_HUMI_OFFSET)
 
     # Data fetch, update and loop
     async def fetching_data(self, *_):
@@ -192,8 +193,8 @@ class Wfirex4Fetcher:
                 illu = int.from_bytes(data[9:11], byteorder='big')
                 acti = int.from_bytes(data[11:12], byteorder='big')
 
-                self.data['temperature'] = round(temp) / 10
-                self.data['humidity'] = int(round(humi / 10))
+                self.data['temperature'] = round(temp) / 10 + self._temp_offset
+                self.data['humidity'] = int(round(humi / 10 + self._humi_offset))
                 self.data['light'] = illu
                 self.data['reliability'] = int(round(acti / 255.0 * 100.0))
             else:

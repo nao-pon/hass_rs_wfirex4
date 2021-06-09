@@ -12,6 +12,8 @@ DOMAIN = 'rs_wfirex4'
 DEFAULT_NAME = 'RS-WFIREX4'
 DEFAULT_SCAN_INTERVAL = 60
 PLATFORMS = ['remote', 'sensor']
+CONF_TEMP_OFFSET = 'temp_offset'
+CONF_HUMI_OFFSET = 'humi_offset'
 
 CONFIG_SCHEMA = vol.Schema({
     DOMAIN: vol.Schema([
@@ -19,6 +21,8 @@ CONFIG_SCHEMA = vol.Schema({
             vol.Required(CONF_HOST): cv.string,
             vol.Optional(CONF_NAME, default=DEFAULT_NAME): cv.string,
             vol.Optional(CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL): cv.positive_int,
+            vol.Optional(CONF_TEMP_OFFSET, default=0.0): vol.All(vol.Coerce(float), vol.Range(min=-10, max=10)),
+            vol.Optional(CONF_HUMI_OFFSET, default=0.0): vol.All(vol.Coerce(float), vol.Range(min=-20, max=20)),
         }),
     ])
 }, extra=vol.ALLOW_EXTRA)
