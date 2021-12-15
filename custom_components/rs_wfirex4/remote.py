@@ -73,7 +73,7 @@ async def async_setup_platform(hass, configs, async_add_entities, config=None):
 
     async_add_entities([remote])
 
-    loaded = await remote.async_load_storage_files()
+    hass.async_create_task(remote.async_load_storage_files())
 
 
 class Wfirex4Remote(RemoteEntity):
@@ -121,7 +121,7 @@ class Wfirex4Remote(RemoteEntity):
         return self._state
 
     @property
-    def device_state_attributes(self):
+    def extra_state_attributes(self):
         """Return device state attributes."""
         attr = {}
         if self._last_command_sent is not None:

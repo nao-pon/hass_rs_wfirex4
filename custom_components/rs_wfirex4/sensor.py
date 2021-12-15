@@ -60,7 +60,7 @@ async def async_setup_platform(hass, configs, async_add_entities, config=None):
     fetcher = Wfirex4Fetcher(hass, host, entities, config)
 
     # Call first task and start loop
-    await fetcher.fetching_data()
+    hass.async_create_task(fetcher.fetching_data())
 
 # ------------------------------------------------------------------------------
 # Define Entity
@@ -92,7 +92,7 @@ class Wfirex4SensorEntity(Entity):
         return SENSOR_TYPES[self.type][2]
 
     @property
-    def device_state_attributes(self):
+    def extra_state_attributes(self):
         return {
             ATTR_ATTRIBUTION: CONF_ATTRIBUTION,
         }
