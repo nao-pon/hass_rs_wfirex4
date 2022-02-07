@@ -123,11 +123,7 @@ class Wfirex4Fetcher:
             async_call_later(self.hass, secs, self.fetching_data)
 
         try:
-            #with async_timeout.timeout(15, loop=self.hass.loop):
-            #    asyncio.create_task(self.get_sensor_data())
-            #await self.get_sensor_data()
-            #self.hass.async_create_task(self.get_sensor_data())
-            with async_timeout.timeout(15, loop=self.hass.loop):
+            with async_timeout.timeout(15):
                 await self.get_sensor_data()
 
         except (asyncio.TimeoutError, Exception) as err:
