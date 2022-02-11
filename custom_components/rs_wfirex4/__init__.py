@@ -47,6 +47,6 @@ async def async_setup(hass, configs):
         else:
             config['uid'] = format_mac(config.get(CONF_MAC))
         for component in PLATFORMS:
-            await hass.helpers.discovery.async_load_platform(component, DOMAIN, config, configs)
+            hass.async_create_task(discovery.async_load_platform(hass, component, DOMAIN, config, configs))
 
     return True

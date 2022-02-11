@@ -60,11 +60,14 @@ _LOGGER = logging.getLogger(__name__)
 async def async_setup_platform(hass, configs, async_add_entities, config=None):
     """Set up the RS-WFIREX4 remote."""
     if config == None:
-        return False
+        return
 
     host = config.get(CONF_HOST)
     name = config.get(CONF_NAME)
     uid = config.get('uid')
+
+    if host == None or name == None or uid == None:
+        return
 
     remote = Wfirex4Remote(name, host, uid,
         Store(hass, CODE_STORAGE_VERSION, f"rs_wfirex4_codes"),
