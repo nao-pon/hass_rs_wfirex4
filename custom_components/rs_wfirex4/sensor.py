@@ -162,7 +162,7 @@ class Wfirex4Fetcher:
 
         # It has updateStateTasks
         if updateStateTasks:
-            await asyncio.wait(updateStateTasks, loop=self.hass.loop)
+            await asyncio.wait(updateStateTasks)
 
     # Get sensors data
     async def get_sensor_data(self, *_):
