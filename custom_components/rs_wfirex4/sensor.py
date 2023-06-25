@@ -147,8 +147,6 @@ class Wfirex4Fetcher:
         if not self.data:
             return
 
-        # Add to updateStateTasks
-        updateStateTasks = []
         for checkEntity in self.entities:
             newState = None
 
@@ -158,11 +156,7 @@ class Wfirex4Fetcher:
             # Chenged data
             if newState != checkEntity._state:
                 checkEntity._state = newState
-                updateStateTasks.append(checkEntity.async_update_ha_state())
-
-        # It has updateStateTasks
-        if updateStateTasks:
-            await asyncio.wait(updateStateTasks)
+                checkEntity.async_schedule_update_ha_state()
 
     # Get sensors data
     async def get_sensor_data(self, *_):
