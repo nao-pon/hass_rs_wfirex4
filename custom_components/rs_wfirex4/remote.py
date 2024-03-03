@@ -18,8 +18,10 @@ from homeassistant.components.remote import (
     ATTR_DELAY_SECS,
     ATTR_NUM_REPEATS,
     DEFAULT_DELAY_SECS,
-    SUPPORT_LEARN_COMMAND,
+    SERVICE_LEARN_COMMAND,
+    SERVICE_SEND_COMMAND,
     RemoteEntity,
+    RemoteEntityFeature,
 )
 
 from homeassistant.helpers.storage import Store
@@ -99,6 +101,10 @@ class Wfirex4Remote(RemoteEntity):
         self._state = True
         self._codeRegx = re.compile(r'^[0-9a-f]{32,}$')
 
+        self._attr_supported_features = (
+            RemoteEntityFeature.LEARN_COMMAND
+        )
+
     @property
     def should_poll(self):
         """No polling needed for a RS-WFIREX4 remote."""
@@ -139,10 +145,6 @@ class Wfirex4Remote(RemoteEntity):
         return attr
 
     @property
-    def supported_features(self):
-        """Flag supported features."""
-        return SUPPORT_LEARN_COMMAND
-
     def turn_on(self, **kwargs):
         """Turn the remote on."""
         self._state = True

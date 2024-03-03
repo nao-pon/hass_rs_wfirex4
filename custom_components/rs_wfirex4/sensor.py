@@ -9,12 +9,20 @@ import asyncio
 import voluptuous as vol
 import homeassistant.helpers.config_validation as cv
 from homeassistant.components.sensor import (
-    DEVICE_CLASS_HUMIDITY,
-    DEVICE_CLASS_ILLUMINANCE,
-    DEVICE_CLASS_TEMPERATURE,
-    DEVICE_CLASS_POWER_FACTOR,
+    SensorDeviceClass,
+    SensorEntity,
+    SensorEntityDescription,
+    SensorStateClass,
 )
-from homeassistant.const import ATTR_ATTRIBUTION, CONF_HOST, CONF_NAME, CONF_SCAN_INTERVAL, PERCENTAGE, TEMP_CELSIUS, LIGHT_LUX
+from homeassistant.const import (
+    ATTR_ATTRIBUTION,
+    CONF_HOST,
+    CONF_NAME,
+    CONF_SCAN_INTERVAL,
+    PERCENTAGE,
+    LIGHT_LUX,
+    UnitOfTemperature,
+)
 
 from homeassistant.helpers.entity import Entity
 from homeassistant.helpers.event import async_call_later
@@ -30,10 +38,10 @@ CONF_ATTRIBUTION = ""
 
 # Sensor type list
 SENSOR_TYPES = {
-    "temperature": ("Temperature", TEMP_CELSIUS, DEVICE_CLASS_TEMPERATURE),
-    "humidity": ("Humidity", PERCENTAGE, DEVICE_CLASS_HUMIDITY),
-    "light": ("Light", LIGHT_LUX, DEVICE_CLASS_ILLUMINANCE),
-    "reliability": ("Reliability", PERCENTAGE, DEVICE_CLASS_POWER_FACTOR),
+    "temperature": ("Temperature", UnitOfTemperature.CELSIUS, SensorDeviceClass.TEMPERATURE),
+    "humidity": ("Humidity", PERCENTAGE, SensorDeviceClass.HUMIDITY),
+    "light": ("Light", LIGHT_LUX, SensorDeviceClass.ILLUMINANCE),
+    "reliability": ("Reliability", PERCENTAGE, SensorDeviceClass.POWER_FACTOR),
 }
 
 _LOGGER = logging.getLogger(__name__)
