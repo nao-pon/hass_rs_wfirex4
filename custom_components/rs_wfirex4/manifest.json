@@ -5,6 +5,6 @@
   "dependencies": [],
   "codeowners": ["@nao-pon"],
   "requirements": [],
-  "version": "2023.6.0",
+  "version": "2024.4.0",
   "iot_class": "local_polling"
 }
