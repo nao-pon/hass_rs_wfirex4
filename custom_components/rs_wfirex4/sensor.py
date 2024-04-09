@@ -6,15 +6,16 @@ Special thanks to https://github.com/NeoSloth/wfirex4
 """
 
 import asyncio
-import voluptuous as vol
-import homeassistant.helpers.config_validation as cv
-from homeassistant.components.sensor import (
-    DEVICE_CLASS_HUMIDITY,
-    DEVICE_CLASS_ILLUMINANCE,
-    DEVICE_CLASS_TEMPERATURE,
-    DEVICE_CLASS_POWER_FACTOR,
+from homeassistant.components.sensor import SensorDeviceClass
+from homeassistant.const import (
+    ATTR_ATTRIBUTION,
+    CONF_HOST,
+    CONF_NAME,
+    CONF_SCAN_INTERVAL,
+    PERCENTAGE,
+    LIGHT_LUX,
+    UnitOfTemperature,
 )
-from homeassistant.const import ATTR_ATTRIBUTION, CONF_HOST, CONF_NAME, CONF_SCAN_INTERVAL, PERCENTAGE, TEMP_CELSIUS, LIGHT_LUX
 
 from homeassistant.helpers.entity import Entity
 from homeassistant.helpers.event import async_call_later
@@ -25,18 +26,24 @@ import random
 
 # ------------------------------------------------------------------------------
 # Config
-from . import DOMAIN, DEFAULT_NAME, DEFAULT_SCAN_INTERVAL, CONF_TEMP_OFFSET, CONF_HUMI_OFFSET
+from . import CONF_TEMP_OFFSET, CONF_HUMI_OFFSET
+
 CONF_ATTRIBUTION = ""
 
 # Sensor type list
 SENSOR_TYPES = {
-    "temperature": ("Temperature", TEMP_CELSIUS, DEVICE_CLASS_TEMPERATURE),
-    "humidity": ("Humidity", PERCENTAGE, DEVICE_CLASS_HUMIDITY),
-    "light": ("Light", LIGHT_LUX, DEVICE_CLASS_ILLUMINANCE),
-    "reliability": ("Reliability", PERCENTAGE, DEVICE_CLASS_POWER_FACTOR),
+    "temperature": (
+        "Temperature",
+        UnitOfTemperature.CELSIUS,
+        SensorDeviceClass.TEMPERATURE,
+    ),
+    "humidity": ("Humidity", PERCENTAGE, SensorDeviceClass.HUMIDITY),
+    "light": ("Light", LIGHT_LUX, SensorDeviceClass.ILLUMINANCE),
+    "reliability": ("Reliability", PERCENTAGE, SensorDeviceClass.POWER_FACTOR),
 }
 
 _LOGGER = logging.getLogger(__name__)
+
 
 # ------------------------------------------------------------------------------
 # Setup Entities
@@ -47,7 +54,7 @@ async def async_setup_platform(hass, configs, async_add_entities, config=None):
 
     host = config.get(CONF_HOST)
     name = config.get(CONF_NAME)
-    uid = config.get('uid')
+    uid = config.get("uid")
 
     if host == None or name == None or uid == None:
         return
@@ -65,44 +72,53 @@ async def async_setup_platform(hass, configs, async_add_entities, config=None):
     # Call first task and start loop
     hass.async_create_task(fetcher.fetching_data())
 
+
 # ------------------------------------------------------------------------------
 # Define Entity
 class Wfirex4SensorEntity(Entity):
     def __init__(self, name, sensor_type, uid):
         self.client_name = name
-        self._state = None
         self.type = sensor_type
         self._uid = uid
 
-    @property
-    def name(self):
-        return '{} {}'.format(self.client_name, SENSOR_TYPES[self.type][0])
+        self._attr_state = None
+        self._attr_name = "{} {}".format(self.client_name, SENSOR_TYPES[self.type][0])
+        self._attr_unique_id = "wfirex4_{}_{}".format(self._uid, self.type)
+        self._attr_should_poll = False
+        self._attr_device_class = SENSOR_TYPES[self.type][2]
+        self._attr_extra_state_attributes = {ATTR_ATTRIBUTION: CONF_ATTRIBUTION}
+        self._attr_unit_of_measurement = SENSOR_TYPES[self.type][1]
 
-    @property
-    def unique_id(self):
-        return 'wfirex4_{}_{}'.format(self._uid, self.type)
+    # @property
+    # def name(self):
+    #     return "{} {}".format(self.client_name, SENSOR_TYPES[self.type][0])
 
-    @property
-    def state(self):
-        return self._state
+    # @property
+    # def unique_id(self):
+    #     return "wfirex4_{}_{}".format(self._uid, self.type)
 
-    @property
-    def should_poll(self):
-        return False
+    # @property
+    # def state(self):
+    #     return self._state
 
-    @property
-    def device_class(self):
-        return SENSOR_TYPES[self.type][2]
+    # @property
+    # def should_poll(self):
+    #     return False
 
-    @property
-    def extra_state_attributes(self):
-        return {
-            ATTR_ATTRIBUTION: CONF_ATTRIBUTION,
-        }
+    # @property
+    # def device_class(self):
+    #     return SENSOR_TYPES[self.type][2]
 
-    @property
-    def unit_of_measurement(self):
-        return SENSOR_TYPES[self.type][1]
+    # @property
+    # def extra_state_attributes(self):
+    #     return {
+    #         ATTR_ATTRIBUTION: CONF_ATTRIBUTION,
+    #     }
+
+    # @property
+    # def unit_of_measurement(self):
+    #     return SENSOR_TYPES[self.type][1]
+
 
 # ------------------------------------------------------------------------------
 # Fetcher Class
@@ -143,7 +159,7 @@ class Wfirex4Fetcher:
 
     # Do update sensors data
     async def updating_devices(self, *_):
-        # Do nothing if empty 
+        # Do nothing if empty
         if not self.data:
             return
 
@@ -154,8 +170,8 @@ class Wfirex4Fetcher:
                 newState = self.data[checkEntity.type]
 
             # Chenged data
-            if newState != checkEntity._state:
-                checkEntity._state = newState
+            if newState != checkEntity._attr_state:
+                checkEntity._attr_state = newState
                 checkEntity.async_schedule_update_ha_state()
 
     # Get sensors data
@@ -165,9 +181,9 @@ class Wfirex4Fetcher:
         con = asyncio.open_connection(self._host, self._port)
         try:
             reader, writer = await asyncio.wait_for(con, timeout=10)
-            writer.write(b'\xAA\x00\x01\x18\x50')
+            writer.write(b"\xAA\x00\x01\x18\x50")
             await writer.drain()
-            data = b''
+            data = b""
             while True:
                 msg = await reader.read(1024)
                 if len(msg) <= 0:
@@ -176,21 +192,19 @@ class Wfirex4Fetcher:
             writer.close()
             await writer.wait_closed()
 
-        except :
+        except:
             raise
 
         else:
-            if (data and data[0:1] == b'\xAA'):
-                humi = int.from_bytes(data[5:7], byteorder='big')
-                temp = int.from_bytes(data[7:9], byteorder='big')
-                illu = int.from_bytes(data[9:11], byteorder='big')
-                acti = int.from_bytes(data[11:12], byteorder='big')
+            if data and data[0:1] == b"\xAA":
+                humi = int.from_bytes(data[5:7], byteorder="big")
+                temp = int.from_bytes(data[7:9], byteorder="big")
+                illu = int.from_bytes(data[9:11], byteorder="big")
+                acti = int.from_bytes(data[11:12], byteorder="big")
 
-                self.data['temperature'] = round(temp) / 10 + self._temp_offset
-                self.data['humidity'] = int(round(humi / 10 + self._humi_offset))
-                self.data['light'] = illu
-                self.data['reliability'] = int(round(acti / 255.0 * 100.0))
+                self.data["temperature"] = round(temp) / 10 + self._temp_offset
+                self.data["humidity"] = int(round(humi / 10 + self._humi_offset))
+                self.data["light"] = illu
+                self.data["reliability"] = int(round(acti / 255.0 * 100.0))
             else:
-                raise Exception('Sensor fetch error.')
-
-
+                raise Exception("Sensor fetch error.")
