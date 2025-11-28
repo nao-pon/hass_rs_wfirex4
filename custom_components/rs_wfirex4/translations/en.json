@@ -1,0 +1,34 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Add RS-WFIREX4 Device",
+        "description": "Enter the host and MAC address of your RS-WFIREX4 device.",
+        "data": {
+          "host": "Host (IP Address)",
+          "mac": "MAC Address",
+          "name": "Device Name",
+          "scan_interval": "Scan Interval (seconds)",
+          "temp_offset": "Temperature Offset",
+          "humi_offset": "Humidity Offset"
+        }
+      }
+    },
+    "abort": {
+      "not_RS-WFIREX4": "This device does not appear to be a RS-WFIREX4."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "RS-WFIREX4 Options",
+        "description": "Adjust scan interval and sensor offsets.",
+        "data": {
+          "scan_interval": "Scan Interval (seconds)",
+          "temp_offset": "Temperature Offset",
+          "humi_offset": "Humidity Offset"
+        }
+      }
+    }
+  }
+}

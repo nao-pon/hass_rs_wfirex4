@@ -1,32 +1,29 @@
-"""
-Hass.io RS-WFIREX4 Sensors
-
-Special thanks to https://github.com/NeoSloth/wfirex4
- and https://www.gcd.org/blog/2020/09/1357/
-"""
+from __future__ import annotations
 
 import asyncio
-from homeassistant.components.sensor import SensorDeviceClass
+import logging
+import time
+from datetime import timedelta
+
+from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
 from homeassistant.const import (
     ATTR_ATTRIBUTION,
     CONF_HOST,
+    CONF_MAC,
     CONF_NAME,
-    CONF_SCAN_INTERVAL,
-    PERCENTAGE,
     LIGHT_LUX,
+    PERCENTAGE,
     UnitOfTemperature,
 )
+from homeassistant.helpers.device_registry import format_mac
+from homeassistant.helpers.update_coordinator import (
+    CoordinatorEntity,
+    DataUpdateCoordinator,
+    UpdateFailed,
+)
 
-from homeassistant.helpers.entity import Entity
-from homeassistant.helpers.event import async_call_later
-
-import logging
-import async_timeout
-import random
-
-# ------------------------------------------------------------------------------
-# Config
-from . import CONF_TEMP_OFFSET, CONF_HUMI_OFFSET
+from .const import DOMAIN, PORT
+from .helpers import build_device_info, resolve_ip_by_mac
 
 CONF_ATTRIBUTION = ""
 
@@ -45,166 +42,203 @@ SENSOR_TYPES = {
 _LOGGER = logging.getLogger(__name__)
 
 
-# ------------------------------------------------------------------------------
-# Setup Entities
-async def async_setup_platform(hass, configs, async_add_entities, config=None):
-    """Representation of a RS-WFIREX4 sensors."""
-    if config == None:
-        return
+# ----------------------------------------------------------------------
+# Setup
+async def async_setup_entry(hass, entry, async_add_entities):
+    """Set up sensors from a config entry."""
+    data = hass.data[DOMAIN][entry.entry_id]
+    opts = entry.options
 
-    host = config.get(CONF_HOST)
-    name = config.get(CONF_NAME)
-    uid = config.get("uid")
+    host = data.get(CONF_HOST)
+    mac = format_mac(data.get(CONF_MAC))
+    name = data.get(CONF_NAME, f"WFireX4 {mac}")
 
-    if host == None or name == None or uid == None:
-        return
+    temp_offset = opts.get("temp_offset", data.get("temp_offset", 0.0))
+    humi_offset = opts.get("humi_offset", data.get("humi_offset", 0.0))
 
+    # Create fetcher
+    scan_interval = opts.get("scan_interval", 60)  # デフォルト60秒
+    fetcher = hass.data[DOMAIN]["fetchers"].get(mac)
+    if not fetcher:
+        fetcher = hass.data[DOMAIN]["fetchers"][mac] = Wfirex4Fetcher(
+            host,
+            mac,
+            temp_offset,
+            humi_offset,
+            scan_interval,
+            entry,
+            hass,
+        )
+
+    coordinator = hass.data[DOMAIN]["coordinators"].get(mac)
+    if not coordinator:
+        coordinator = hass.data[DOMAIN]["coordinators"][mac] = DataUpdateCoordinator(
+            hass,
+            _LOGGER,
+            name=name,
+            update_interval=timedelta(seconds=scan_interval),  # Coordinator更新間隔
+            update_method=fetcher.get_sensor_data,
+        )
+
+    await coordinator.async_config_entry_first_refresh()
+
+    # Create entities (replace with actual entities from project)
     entities = []
     for sensor_type in SENSOR_TYPES.keys():
-        entities.append(Wfirex4SensorEntity(name, sensor_type, uid))
-
-    async_add_entities(entities)
-
-    # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-    # Class of Data fetcher
-    fetcher = Wfirex4Fetcher(hass, host, entities, config)
-
-    # Call first task and start loop
-    hass.async_create_task(fetcher.fetching_data())
+        entities.append(WfirexCoordinatorSensor(coordinator, mac, name, sensor_type))
+    async_add_entities(entities, update_before_add=True)
 
 
-# ------------------------------------------------------------------------------
-# Define Entity
-class Wfirex4SensorEntity(Entity):
-    def __init__(self, name, sensor_type, uid):
-        self.client_name = name
+async def async_update_entry_host(hass, entry, new_host: str):
+    """ConfigEntry 内の host(IP) を更新"""
+    if entry.data.get("host") != new_host:
+        hass.config_entries.async_update_entry(
+            entry, data={**entry.data, "host": new_host}
+        )
+        _LOGGER.info("Updated host for %s to %s", entry.entry_id, new_host)
+
+
+# ----------------------------------------------------------------------
+# Coordinator-based Sensor Entity
+class WfirexCoordinatorSensor(CoordinatorEntity, SensorEntity):
+    """Representation of a WFIREX4 sensor managed via DataUpdateCoordinator."""
+
+    def __init__(
+        self,
+        coordinator: DataUpdateCoordinator,
+        mac: str,
+        name: str,
+        sensor_type: str,
+    ) -> None:
+        """Initialize the WFIREX4 sensor entity.
+
+        Args:
+            coordinator: Shared data update coordinator.
+            mac: MAC address of the device.
+            name: User-defined device name (e.g. "Living").
+            sensor_type: Key identifying the type of sensor (e.g. "temperature").
+        """
+        super().__init__(coordinator)
+
         self.type = sensor_type
-        self._uid = uid
 
-        self._attr_state = None
-        self._attr_name = "{} {}".format(self.client_name, SENSOR_TYPES[self.type][0])
-        self._attr_unique_id = "wfirex4_{}_{}".format(self._uid, self.type)
-        self._attr_should_poll = False
+        # Entity name ("Living Temperature")
+        self._attr_name = f"{name} {SENSOR_TYPES[self.type][0]}"
+
+        # Unique ID ("wfirex4_112233_temperature")
+        mac_suffix = format_mac(mac)
+        self._attr_unique_id = f"wfirex4_{mac_suffix}_{self.type}"
+
+        # Device registry
+        self._attr_device_info = build_device_info(mac, name)
+
+        # Sensor metadata
+        self._attr_native_unit_of_measurement = SENSOR_TYPES[self.type][1]
         self._attr_device_class = SENSOR_TYPES[self.type][2]
         self._attr_extra_state_attributes = {ATTR_ATTRIBUTION: CONF_ATTRIBUTION}
-        self._attr_unit_of_measurement = SENSOR_TYPES[self.type][1]
 
-    # @property
-    # def name(self):
-    #     return "{} {}".format(self.client_name, SENSOR_TYPES[self.type][0])
-
-    # @property
-    # def unique_id(self):
-    #     return "wfirex4_{}_{}".format(self._uid, self.type)
-
-    # @property
-    # def state(self):
-    #     return self._state
-
-    # @property
-    # def should_poll(self):
-    #     return False
-
-    # @property
-    # def device_class(self):
-    #     return SENSOR_TYPES[self.type][2]
-
-    # @property
-    # def extra_state_attributes(self):
-    #     return {
-    #         ATTR_ATTRIBUTION: CONF_ATTRIBUTION,
-    #     }
-
-    # @property
-    # def unit_of_measurement(self):
-    #     return SENSOR_TYPES[self.type][1]
+    @property
+    def native_value(self) -> int | float | None:
+        """Return the latest sensor value from the coordinator."""
+        data = self.coordinator.data
+        if not data:
+            return None
+        return data.get(self.type)
 
 
-# ------------------------------------------------------------------------------
-# Fetcher Class
+# ----------------------------------------------------------------------
+# Fetcher with 60-second throttle
+# Fetcher
 class Wfirex4Fetcher:
-    def __init__(self, hass, host, entities, config):
+    def __init__(
+        self,
+        host,
+        mac,
+        temp_offset=0,
+        humi_offset=0,
+        scan_interval=60,
+        entry=None,
+        hass=None,
+    ):
         self.data = {}
-        self.hass = hass
-        self.entities = entities
         self._host = host
-        self._port = 60001
-        self._interval = config.get(CONF_SCAN_INTERVAL)
-        self._temp_offset = config.get(CONF_TEMP_OFFSET)
-        self._humi_offset = config.get(CONF_HUMI_OFFSET)
+        self._mac = mac
+        self._port = PORT
+        self._temp_offset = temp_offset
+        self._humi_offset = humi_offset
+        self._scan_interval = scan_interval
+        self._last_fetch_time = 0
+        self._lock = asyncio.Lock()
+        self._entry = entry
+        self.hass = hass
 
-    # Data fetch, update and loop
-    async def fetching_data(self, *_):
-        def try_again(err: str):
-            # Retry
-            secs = random.randint(30, 60)
-            _LOGGER.error("Retrying in %i seconds: %s", secs, err)
-            async_call_later(self.hass, secs, self.fetching_data)
+    async def get_sensor_data(self):
+        async with self._lock:
+            now = time.monotonic()
+            if now - self._last_fetch_time < self._scan_interval:
+                return self.data
 
-        try:
-            with async_timeout.timeout(15):
-                await self.get_sensor_data()
+            self._last_fetch_time = now
+            host_to_connect = self._host
 
-        except (asyncio.TimeoutError, Exception) as err:
-            # Error then retry
-            try_again(err)
+            try:
+                reader, writer = await asyncio.wait_for(
+                    asyncio.open_connection(host_to_connect, self._port), timeout=10
+                )
+            except Exception:
+                # HA 内部デバイスレジストリから IP 再取得
+                resolved_ip = await resolve_ip_by_mac(self.hass, self._mac)
+                if resolved_ip:
+                    host_to_connect = resolved_ip
+                    try:
+                        reader, writer = await asyncio.wait_for(
+                            asyncio.open_connection(host_to_connect, self._port),
+                            timeout=10,
+                        )
+                        # 成功したら config entry も更新
+                        if self._entry and self.hass:
+                            await self._update_entry_host(resolved_ip)
+                        self._host = resolved_ip
+                    except Exception as err2:
+                        raise UpdateFailed(
+                            f"Failed to fetch sensor data after resolving IP: {err2}"
+                        )
+                else:
+                    raise UpdateFailed(
+                        f"Cannot resolve IP for MAC {self._mac}, device not known in HA"
+                    )
 
-        else:
-            # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-            # call updating_devices()
-            await self.updating_devices()
-
-            # make loop with fetch interval
-            async_call_later(self.hass, self._interval, self.fetching_data)
-
-    # Do update sensors data
-    async def updating_devices(self, *_):
-        # Do nothing if empty
-        if not self.data:
-            return
-
-        for checkEntity in self.entities:
-            newState = None
-
-            if checkEntity.type in self.data.keys():
-                newState = self.data[checkEntity.type]
-
-            # Chenged data
-            if newState != checkEntity._attr_state:
-                checkEntity._attr_state = newState
-                checkEntity.async_schedule_update_ha_state()
-
-    # Get sensors data
-    async def get_sensor_data(self, *_):
-        import math
-
-        con = asyncio.open_connection(self._host, self._port)
-        try:
-            reader, writer = await asyncio.wait_for(con, timeout=10)
-            writer.write(b"\xAA\x00\x01\x18\x50")
+            # デバイスからデータ取得
+            writer.write(b"\xaa\x00\x01\x18\x50")
             await writer.drain()
+
             data = b""
             while True:
                 msg = await reader.read(1024)
-                if len(msg) <= 0:
+                if not msg:
                     break
                 data += msg
+
             writer.close()
             await writer.wait_closed()
 
-        except:
-            raise
-
-        else:
-            if data and data[0:1] == b"\xAA":
+            if data and data[0:1] == b"\xaa":
                 humi = int.from_bytes(data[5:7], byteorder="big")
                 temp = int.from_bytes(data[7:9], byteorder="big")
                 illu = int.from_bytes(data[9:11], byteorder="big")
                 acti = int.from_bytes(data[11:12], byteorder="big")
 
-                self.data["temperature"] = round(temp) / 10 + self._temp_offset
+                self.data["temperature"] = temp / 10 + self._temp_offset
                 self.data["humidity"] = int(round(humi / 10 + self._humi_offset))
                 self.data["light"] = illu
                 self.data["reliability"] = int(round(acti / 255.0 * 100.0))
+                return self.data
             else:
-                raise Exception("Sensor fetch error.")
+                raise UpdateFailed("Sensor fetch error.")
+
+    async def _update_entry_host(self, new_host: str):
+        """ConfigEntry 内の host(IP) を更新"""
+        if self._entry.data.get("host") != new_host:
+            self.hass.config_entries.async_update_entry(
+                self._entry, data={**self._entry.data, "host": new_host}
+            )

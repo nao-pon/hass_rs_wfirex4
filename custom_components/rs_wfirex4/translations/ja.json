@@ -1,0 +1,34 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "RS-WFIREX4 デバイスの追加",
+        "description": "RS-WFIREX4 デバイスのホスト（IP）と MAC アドレスを入力してください。",
+        "data": {
+          "host": "ホスト（IP アドレス）",
+          "mac": "MAC アドレス",
+          "name": "デバイス名",
+          "scan_interval": "更新間隔（秒）",
+          "temp_offset": "温度オフセット",
+          "humi_offset": "湿度オフセット"
+        }
+      }
+    },
+    "abort": {
+      "not_RS-WFIREX4": "このデバイスは RS-WFIREX4 ではありません。"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "RS-WFIREX4 オプション",
+        "description": "更新間隔とオフセット値を調整できます。",
+        "data": {
+          "scan_interval": "更新間隔（秒）",
+          "temp_offset": "温度オフセット",
+          "humi_offset": "湿度オフセット"
+        }
+      }
+    }
+  }
+}

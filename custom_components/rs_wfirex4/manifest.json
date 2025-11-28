@@ -4,7 +4,13 @@
   "documentation": "https://github.com/nao-pon/hass_rs_wfirex4",
   "dependencies": [],
   "codeowners": ["@nao-pon"],
+  "config_flow": true,
+  "dhcp": [
+    {
+      "macaddress": "00:1C:C2*"
+    }
+  ],
   "requirements": [],
-  "version": "2024.4.0",
+  "version": "2025.11.0",
   "iot_class": "local_polling"
 }

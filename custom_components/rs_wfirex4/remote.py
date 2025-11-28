@@ -1,31 +1,33 @@
 """RS-WFIREX4 Remote platform that has a remotes."""
-import re
-import asyncio
-import voluptuous as vol
-import homeassistant.helpers.config_validation as cv
 
+import asyncio
+import logging
+import re
 from base64 import b64decode
 from collections import defaultdict
 from itertools import product
-from homeassistant.core import callback
-from homeassistant.const import CONF_HOST, CONF_NAME
-from homeassistant.exceptions import HomeAssistantError
+from typing import Any
+
+import homeassistant.helpers.config_validation as cv
+import voluptuous as vol
+from homeassistant.components.persistent_notification import async_create, async_dismiss
 from homeassistant.components.remote import (
     ATTR_ALTERNATIVE,
-    ATTR_COMMAND,
-    ATTR_DEVICE,
     ATTR_DELAY_SECS,
+    ATTR_DEVICE,
     ATTR_NUM_REPEATS,
     DEFAULT_DELAY_SECS,
     RemoteEntity,
     RemoteEntityFeature,
 )
-
+from homeassistant.const import ATTR_COMMAND, CONF_HOST, CONF_MAC, CONF_NAME
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers.device_registry import format_mac
 from homeassistant.helpers.storage import Store
 
-import logging
-
-from . import DEFAULT_NAME
+from .const import DEFAULT_NAME, DOMAIN, PORT
+from .helpers import build_device_info
 
 CODE_STORAGE_VERSION = 1
 FLAG_STORAGE_VERSION = 1
@@ -57,53 +59,48 @@ SERVICE_LEARN_SCHEMA = COMMAND_SCHEMA.extend(
 _LOGGER = logging.getLogger(__name__)
 
 
-async def async_setup_platform(hass, configs, async_add_entities, config=None):
-    """Set up the RS-WFIREX4 remote."""
-    if config == None:
-        return
+async def async_setup_entry(hass: HomeAssistant, entry, async_add_entities):
+    """Set up remote from a config entry."""
+    data = hass.data[DOMAIN][entry.entry_id]
 
-    host = config.get(CONF_HOST)
-    name = config.get(CONF_NAME)
-    uid = config.get("uid")
+    host = data.get(CONF_HOST)
+    mac = format_mac(data.get(CONF_MAC))
+    name = data.get(CONF_NAME, f"WFireX4 {mac}")
 
-    if host == None or name == None or uid == None:
-        return
-
-    remote = Wfirex4Remote(
-        name,
+    remote_entity = Wfirex4Remote(
         host,
-        uid,
-        Store(hass, CODE_STORAGE_VERSION, f"rs_wfirex4_codes"),
-        Store(hass, FLAG_STORAGE_VERSION, f"rs_wfirex4_{uid}_flags"),
+        mac,
+        name,
+        Store(hass, CODE_STORAGE_VERSION, "rs_wfirex4_codes"),
+        Store(hass, FLAG_STORAGE_VERSION, f"rs_wfirex4_{mac}_flags"),
     )
-
-    async_add_entities([remote])
-
-    hass.async_create_task(remote.async_load_storage_files())
+    async_add_entities([remote_entity], update_before_add=False)
+    hass.async_create_task(remote_entity.async_load_storage_files())
 
 
 class Wfirex4Remote(RemoteEntity):
     """Representation of a RS-WFIREX4 remote."""
 
-    def __init__(self, name, host, uid, code, flag):
+    def __init__(self, host: str, mac: str, name: str, code, flag):
         """Initialize the RS-WFIREX4 Remote."""
         self._name = name or DEFAULT_NAME
         self._host = host
-        self._port = 60001
-        self._uid = uid
-        self._code_storege = code
-        self._flag_storage = flag
+        self._port = PORT
+        self._code_storege: Store[Any] = code
+        self._flag_storage: Store[Any] = flag
         self._codes = {}
         self._flags = defaultdict(int)
         self._attr_is_on = True
         self._codeRegx = re.compile(r"^[0-9a-f]{32,}$")
 
         self._attr_name = "{} {}".format(self._name, "Remote")
-        self._attr_unique_id = "wfirex4_{}_remote".format(self._uid)
+        self._attr_unique_id = "wfirex4_{}_remote".format(mac)
         self._attr_icon = "mdi:remote"
         self._attr_should_poll = False
         self._attr_supported_features = RemoteEntityFeature.LEARN_COMMAND
         self._attr_extra_state_attributes = {}
+
+        self._attr_device_info = build_device_info(mac, name)
 
     def turn_on(self, **kwargs):
         """Turn the remote on."""
@@ -171,7 +168,7 @@ class Wfirex4Remote(RemoteEntity):
                 "Failed to create '%s Remote' entity: Storage error",
                 "{} {}".format(self._name, "Remote"),
             )
-            self._code_storege = None
+            # self._code_storege = None
 
     async def async_send_command(self, command, **kwargs):
         """Send a list of commands to a device."""
@@ -208,7 +205,7 @@ class Wfirex4Remote(RemoteEntity):
                 await self.set_wfirex(code)
                 last_code = code
 
-            except:
+            except Exception:
                 # @todo
                 continue
 
@@ -237,7 +234,7 @@ class Wfirex4Remote(RemoteEntity):
         payload = b"\x11\x00" + wave_data_len_hex + wave_data
         crc = self.crc8_calc(payload).to_bytes(1, "big")
         payload_len = len(payload).to_bytes(2, "big")
-        header = b"\xAA" + payload_len
+        header = b"\xaa" + payload_len
         send_data = header + payload + crc
 
         reader, writer = await asyncio.open_connection(self._host, self._port)
@@ -262,10 +259,12 @@ class Wfirex4Remote(RemoteEntity):
             writer.write(b"\xaa\x00\x01\x12\x6c")
             await writer.drain()
 
-            self.hass.components.persistent_notification.async_create(
+            notify_id = f"{DOMAIN}_learn_command"
+            async_create(
+                self.hass,
                 f"Press the '{command}' button.",
                 title="Learn command",
-                notification_id="learn_command",
+                notification_id=notify_id,
             )
 
             data = b""
@@ -277,11 +276,9 @@ class Wfirex4Remote(RemoteEntity):
             writer.close()
             await writer.wait_closed()
 
-            self.hass.components.persistent_notification.async_dismiss(
-                notification_id="learn_command"
-            )
+            async_dismiss(self.hass, notification_id=notify_id)
 
-            if data and data[0:1] == b"\xAA":
+            if data and data[0:1] == b"\xaa":
                 code = data.hex()[16:]
                 self._attr_extra_state_attributes["last_learn"] = code
                 return code

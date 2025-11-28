@@ -1,78 +1,128 @@
-"""RS-WFIREX4 Load Platform integration."""
+"""rs_wfirex4 integration entrypoints."""
 
-from getmac import get_mac_address
+from __future__ import annotations
 
+import asyncio
 import logging
-import voluptuous as vol
-import homeassistant.helpers.config_validation as cv
 
-from homeassistant.helpers import discovery
-from homeassistant.helpers.device_registry import format_mac
-from homeassistant.const import CONF_HOST, CONF_NAME, CONF_SCAN_INTERVAL, CONF_MAC
+from homeassistant.config_entries import SOURCE_IMPORT, ConfigEntry
+from homeassistant.const import CONF_HOST, CONF_MAC
+from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ConfigEntryNotReady
 
-DOMAIN = "rs_wfirex4"
-DEFAULT_NAME = "RS-WFIREX4"
-DEFAULT_SCAN_INTERVAL = 60
-PLATFORMS = ["remote", "sensor"]
-CONF_TEMP_OFFSET = "temp_offset"
-CONF_HUMI_OFFSET = "humi_offset"
+from .const import DOMAIN, PORT
+from .helpers import resolve_ip_by_mac
 
 _LOGGER = logging.getLogger(__name__)
 
-CONFIG_SCHEMA = vol.Schema(
-    {
-        DOMAIN: vol.Schema(
-            [
-                vol.Schema(
-                    {
-                        vol.Required(CONF_HOST): cv.string,
-                        vol.Optional(CONF_MAC, default=""): cv.string,
-                        vol.Optional(CONF_NAME, default=DEFAULT_NAME): cv.string,
-                        vol.Optional(
-                            CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL
-                        ): cv.positive_int,
-                        vol.Optional(CONF_TEMP_OFFSET, default=0.0): vol.All(
-                            vol.Coerce(float), vol.Range(min=-10, max=10)
-                        ),
-                        vol.Optional(CONF_HUMI_OFFSET, default=0.0): vol.All(
-                            vol.Coerce(float), vol.Range(min=-20, max=20)
-                        ),
-                    }
-                ),
-            ]
-        )
-    },
-    extra=vol.ALLOW_EXTRA,
-)
+PLATFORMS = ["sensor", "remote"]
 
 
-async def async_setup(hass, configs):
-    for config in configs.get(DOMAIN):
-        if config.get(CONF_MAC) == "":
-            ip = config.get(CONF_HOST)
-            mac = get_mac_address(ip)
-            _LOGGER.info("Detected Mac address as %s.", mac)
-            if mac is None or mac == "00:00:00:00:00:00":
-                ips = ip.split(".")
-                mac = (
-                    "00:1C:C2:"
-                    + format(int(ips[1]), "02X")
-                    + ":"
-                    + format(int(ips[2]), "02X")
-                    + ":"
-                    + format(int(ips[3]), "02X")
-                )
-                _LOGGER.warning(
-                    'The MAC address could not be detected automatically. Use "%s" as the fake address. You can specify the correct MAC address with the "mac" option for more perfect operation.',
-                    mac,
-                )
+async def async_setup(hass: HomeAssistant, config: dict):
+    """Set up the integration via YAML (import flow)."""
+    if DOMAIN not in config:
+        return True
 
-            config["uid"] = format_mac(mac)
-        else:
-            config["uid"] = format_mac(config.get(CONF_MAC))
-        for component in PLATFORMS:
-            hass.async_create_task(
-                discovery.async_load_platform(hass, component, DOMAIN, config, configs)
+    for entry_conf in config[DOMAIN]:
+        hass.async_create_task(
+            hass.config_entries.flow.async_init(
+                DOMAIN,
+                context={"source": SOURCE_IMPORT},
+                data=entry_conf,
             )
+        )
 
     return True
+
+
+async def _test_connection(hass: HomeAssistant, host: str, mac: str) -> str | None:
+    """
+    Try connecting to host:60001.
+    If fails, attempt resolve_ip_by_mac and return new IP if successful.
+    Return:
+      - host (str): confirmed reachable host
+      - new_host (str): resolved IP when host=NG but MAC=OK
+      - None → connection failed completely
+    """
+
+    # 1. First try configured host
+    if host:
+        try:
+            _, writer = await asyncio.wait_for(
+                asyncio.open_connection(host, PORT), timeout=5
+            )
+            writer.close()
+            await writer.wait_closed()
+            return host
+        except Exception:
+            _LOGGER.debug("Connection test failed for %s", host)
+
+    # 2. Resolve by MAC (fallback)
+    if mac:
+        try:
+            new_ip = await resolve_ip_by_mac(hass, mac)
+            if new_ip:
+                _LOGGER.warning("Resolved new IP %s for MAC %s", new_ip, mac)
+                reader, writer = await asyncio.wait_for(
+                    asyncio.open_connection(new_ip, PORT), timeout=5
+                )
+                writer.close()
+                await writer.wait_closed()
+                return new_ip
+        except Exception:
+            _LOGGER.debug("Connection test via MAC %s failed", mac)
+
+    return None
+
+
+async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
+    """Set up config entry with connection check BEFORE forwarding platforms."""
+
+    hass.data.setdefault(
+        DOMAIN,
+        {
+            "coordinators": {},
+            "fetchers": {},
+        },
+    )
+
+    host = entry.data.get(CONF_HOST, "")
+    mac = entry.data.get(CONF_MAC, "").upper()
+
+    # -----------------------
+    # 1. Check connection
+    # -----------------------
+    try:
+        reachable_host = await _test_connection(hass, host, mac)
+    except Exception as err:
+        _LOGGER.exception("Unexpected error during pre-setup connection test")
+        raise ConfigEntryNotReady from err
+
+    if not reachable_host:
+        # Home Assistant は自動リトライするので OK
+        raise ConfigEntryNotReady("Device not reachable during setup")
+
+    # -----------------------
+    # 2. Save if IP changed
+    # -----------------------
+    if reachable_host != host:
+        new_data = {**entry.data, CONF_HOST: reachable_host}
+        hass.config_entries.async_update_entry(entry, data=new_data)
+        host = reachable_host
+        _LOGGER.info("Updated host for %s to %s", entry.entry_id, host)
+
+    # -----------------------
+    # 3. forward to platform
+    # -----------------------
+    hass.data[DOMAIN][entry.entry_id] = entry.data
+
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    return True
+
+
+async def async_unload_entry(hass: HomeAssistant, entry):
+    """Unload a config entry."""
+    unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    if unload_ok:
+        hass.data[DOMAIN].pop(entry.entry_id, None)
+    return unload_ok
