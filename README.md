@@ -1,38 +1,64 @@
-[![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg?style=for-the-badge)](https://github.com/custom-components/hacs)
+# RS-WFIREX4 Integration for Home Assistant
 
-# Sensor fetcher and IR contoroler for RS-WFIREX4
+RS-WFIREX4 is a custom Home Assistant integration for controlling **RS-WFIREX4 devices**.
 
-A custom componet of Home Assistant to use RS-WFIREX4. This component is still under development. Do not use it in a production environment.
+This integration now supports configuration via the **Home Assistant UI**, eliminating the need to edit `configuration.yaml`.
 
-## Installation & configuration
-You can install this component in two ways: via HACS or manually.
+## Features
 
-### Option A: Installing via HACS
-If you have HACS, you must add this repository ("https://github.com/nao-pon/hass_rs_wfirex4") to your Custom Repository 
-selecting the Configuration Tab in the HACS page.
-After this you can go in the Integration Tab and search the "RS-WFIREX4" component to configure it.
+* Control RS-WFIREX4 infrared learning remote devices
+* Monitor temperature, humidity, and illuminance sensors
+* UI-based configuration for easy setup
+* Automatic state updates
+* Configurable scan interval
 
-### Option B: Manually installation (custom_component)
-1. Clone the git master branch.
-2. Unzip/copy the tuya_custom direcotry within the `custom_components` directory of your homeassistant installation.
-The `custom_components` directory resides within your homeassistant configuration directory.
-Usually, the configuration directory is within your home (`~/.homeassistant/`).
-In other words, the configuration directory of homeassistant is where the configuration.yaml file is located.
+## Installation
 
-### Entity parameters (configuration.yaml)
+### HACS (Recommended)
 
-```
-rs_wfirex4:
-  - host: "xxx.xxx.xxx.xxx"   # IP address of your first RS-WFIREX4
-    mac : "xx:xx:xx:xx:xx:xx" # Optional MAC Address of this device (Recommend to set for device identification)
-    name: "Living Wfirex4"    # Optional entity name
-    scan_interval: 30         # Optional seconds of scan interval (Default 60)
+1. Open HACS in Home Assistant.
+2. Go to **Integrations → Explore & Download Repositories**.
+3. Search for `RS-WFIREX4` and install it.
+4. Restart Home Assistant.
 
-  - host: "xxx.xxx.xxx.xxx"   # IP address of your second RS-WFIREX4
-    mac : "xx:xx:xx:xx:xx:xx" # Optional MAC Address of this device (Recommend to set for device identification)
-    name: "Living Wfirex4"    # Optional entity name
-    scan_interval: 30         # Optional seconds of scan interval (Default 60)
-```
-You can find entities that four sensors and one remote.
+### Manual Installation
 
-This remote entity can be used in much the same way as [Broadlink's remote](https://www.home-assistant.io/integrations/broadlink/#remote) entity.
+1. Download the repository.
+2. Copy the contents of the `custom_components/rs_wfirex4` folder into your Home Assistant `custom_components/rs_wfirex4` directory.
+3. **Restart Home Assistant** to load the new integration.
+
+> **Note:** Restarting Home Assistant is required after manually adding files to `custom_components`.
+
+## Configuration
+
+### UI Setup
+
+1. Go to **Settings → Devices & Services → Add Integration**.
+
+2. Search for `RS-WFIREX4` and click **Configure**.
+
+3. Fill in the following fields:
+
+   * **Host**: IP address of your RS-WFIREX4 device
+   * **MAC Address**: MAC address of the device
+   * **Name**: Friendly name for this device
+   * **Scan Interval**: Polling interval in seconds (optional)
+
+4. Click **Submit** to complete the setup.
+
+> **Note:** Previously, configuration required editing `configuration.yaml`. This is no longer necessary.
+
+### Options
+
+Once the integration is added, you can adjust options such as scan interval via the **Integration Options** in Home Assistant UI.
+
+## Troubleshooting
+
+* Make sure your RS-WFIREX4 device is reachable on your network.
+* If devices do not appear, try restarting Home Assistant.
+* For network issues, check your firewall and router settings.
+
+## Contributing
+
+Feel free to open issues or pull requests in this repository.
+
