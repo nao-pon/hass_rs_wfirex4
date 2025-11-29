@@ -15,11 +15,11 @@ from .const import (
     CONF_HUMI_OFFSET,
     CONF_TEMP_OFFSET,
     DEFAULT_HUMI_OFFSET,
-    DEFAULT_NAME,
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_TEMP_OFFSET,
     DOMAIN,
 )
+from .helpers import build_default_name_with_mac, test_connection
 
 
 class WFireX4ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -29,21 +29,26 @@ class WFireX4ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_user(self, user_input=None):
         """Handle the initial step when a user adds the integration manually."""
+        discovery = self.context.get("discovery_info", {})
         if user_input is not None:
-            mac = user_input[CONF_MAC].upper()
+            mac = format_mac(user_input[CONF_MAC])
             user_input[CONF_MAC] = mac
 
-            await self.async_set_unique_id(mac)
+            await self.async_set_unique_id(mac.replace(":", ""))
             self._abort_if_unique_id_configured()
 
-            title = f"{user_input.get(CONF_NAME)} {mac}" or f"WFIREX4 {mac}"
+            title = user_input.get(CONF_NAME, build_default_name_with_mac(mac))
             return self.async_create_entry(title=title, data=user_input)
 
+        mac = discovery.get(CONF_MAC, "")
         data_schema = vol.Schema(
             {
-                vol.Required(CONF_HOST): str,
-                vol.Required(CONF_MAC): str,
-                vol.Required(CONF_NAME, default="WFIREX4"): str,
+                vol.Required(CONF_HOST, default=discovery.get(CONF_HOST, "")): str,
+                vol.Required(CONF_MAC, default=mac): str,
+                vol.Required(
+                    CONF_NAME,
+                    default=discovery.get(CONF_NAME, build_default_name_with_mac(mac)),
+                ): str,
                 vol.Optional(CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL): int,
                 vol.Optional(CONF_TEMP_OFFSET, default=DEFAULT_TEMP_OFFSET): vol.Coerce(
                     float
@@ -58,13 +63,13 @@ class WFireX4ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_import(self, user_input):
         """Import from configuration.yaml (SOURCE_IMPORT)."""
-        mac = user_input.get(CONF_MAC, "").upper()
+        mac = format_mac(user_input.get(CONF_MAC, ""))
         user_input[CONF_MAC] = mac
 
-        await self.async_set_unique_id(mac)
+        await self.async_set_unique_id(mac.replace(":", ""))
         self._abort_if_unique_id_configured()
 
-        title = user_input.get(CONF_NAME) or f"{DEFAULT_NAME} {mac}"
+        title = user_input.get(CONF_NAME, build_default_name_with_mac(mac))
         options = {
             CONF_SCAN_INTERVAL: user_input.get(
                 CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
@@ -76,24 +81,26 @@ class WFireX4ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_dhcp(self, discovery_info):
         """Handle DHCP discovery — start config flow when MAC prefix matches."""
-        mac = discovery_info.macaddress.upper()
-        # Only handle devices with the expected prefix
-        if not mac.startswith("00:1C:C2"):
-            return self.async_abort(reason="not_wfirex4")
+        host = discovery_info.ip
+        mac = discovery_info.macaddress
 
-        await self.async_set_unique_id(mac)
-        self._abort_if_unique_id_configured()
+        # Optional: avoid false positives by testing connection
+        try:
+            await test_connection(self.hass, host, mac)
+        except Exception:
+            # Do not start config flow if device is unreachable
+            return self.async_abort(reason="cannot_connect")
 
-        data = {
+        await self.async_set_unique_id(format_mac(mac).replace(":", ""))
+        self._abort_if_unique_id_configured(updates={CONF_HOST: host})
+
+        self.context["discovery_info"] = {
+            CONF_HOST: host,
             CONF_MAC: mac,
-            CONF_HOST: discovery_info.ip,
-            CONF_NAME: f"{DEFAULT_NAME} ({format_mac(mac)[-6]})",
-            CONF_SCAN_INTERVAL: DEFAULT_SCAN_INTERVAL,
-            CONF_TEMP_OFFSET: DEFAULT_TEMP_OFFSET,
-            CONF_HUMI_OFFSET: DEFAULT_HUMI_OFFSET,
+            CONF_NAME: build_default_name_with_mac(mac),
         }
 
-        return self.async_create_entry(title=f"{DEFAULT_NAME} {mac}", data=data)
+        return await self.async_step_user()
 
     @staticmethod
     @callback

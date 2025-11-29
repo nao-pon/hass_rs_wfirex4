@@ -27,7 +27,7 @@ from homeassistant.helpers.device_registry import format_mac
 from homeassistant.helpers.storage import Store
 
 from .const import DEFAULT_NAME, DOMAIN, PORT
-from .helpers import build_device_info
+from .helpers import build_default_name_with_mac, build_device_info
 
 CODE_STORAGE_VERSION = 1
 FLAG_STORAGE_VERSION = 1
@@ -65,14 +65,14 @@ async def async_setup_entry(hass: HomeAssistant, entry, async_add_entities):
 
     host = data.get(CONF_HOST)
     mac = format_mac(data.get(CONF_MAC))
-    name = data.get(CONF_NAME, f"WFireX4 {mac}")
+    name = data.get(CONF_NAME, build_default_name_with_mac(mac))
 
     remote_entity = Wfirex4Remote(
         host,
         mac,
         name,
         Store(hass, CODE_STORAGE_VERSION, "rs_wfirex4_codes"),
-        Store(hass, FLAG_STORAGE_VERSION, f"rs_wfirex4_{mac}_flags"),
+        Store(hass, FLAG_STORAGE_VERSION, f"rs_wfirex4_{mac.replace(':', '')}_flags"),
     )
     async_add_entities([remote_entity], update_before_add=False)
     hass.async_create_task(remote_entity.async_load_storage_files())

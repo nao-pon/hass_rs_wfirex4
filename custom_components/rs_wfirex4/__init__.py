@@ -9,9 +9,10 @@ from homeassistant.config_entries import SOURCE_IMPORT, ConfigEntry
 from homeassistant.const import CONF_HOST, CONF_MAC
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.helpers.device_registry import format_mac
 
 from .const import DOMAIN, PORT
-from .helpers import resolve_ip_by_mac
+from .helpers import resolve_ip_by_mac, test_connection
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -35,44 +36,44 @@ async def async_setup(hass: HomeAssistant, config: dict):
     return True
 
 
-async def _test_connection(hass: HomeAssistant, host: str, mac: str) -> str | None:
-    """
-    Try connecting to host:60001.
-    If fails, attempt resolve_ip_by_mac and return new IP if successful.
-    Return:
-      - host (str): confirmed reachable host
-      - new_host (str): resolved IP when host=NG but MAC=OK
-      - None → connection failed completely
-    """
+# async def _test_connection(hass: HomeAssistant, host: str, mac: str) -> str | None:
+#     """
+#     Try connecting to host:60001.
+#     If fails, attempt resolve_ip_by_mac and return new IP if successful.
+#     Return:
+#       - host (str): confirmed reachable host
+#       - new_host (str): resolved IP when host=NG but MAC=OK
+#       - None → connection failed completely
+#     """
 
-    # 1. First try configured host
-    if host:
-        try:
-            _, writer = await asyncio.wait_for(
-                asyncio.open_connection(host, PORT), timeout=5
-            )
-            writer.close()
-            await writer.wait_closed()
-            return host
-        except Exception:
-            _LOGGER.debug("Connection test failed for %s", host)
+#     # 1. First try configured host
+#     if host:
+#         try:
+#             _, writer = await asyncio.wait_for(
+#                 asyncio.open_connection(host, PORT), timeout=5
+#             )
+#             writer.close()
+#             await writer.wait_closed()
+#             return host
+#         except Exception:
+#             _LOGGER.debug("Connection test failed for %s", host)
 
-    # 2. Resolve by MAC (fallback)
-    if mac:
-        try:
-            new_ip = await resolve_ip_by_mac(hass, mac)
-            if new_ip:
-                _LOGGER.warning("Resolved new IP %s for MAC %s", new_ip, mac)
-                reader, writer = await asyncio.wait_for(
-                    asyncio.open_connection(new_ip, PORT), timeout=5
-                )
-                writer.close()
-                await writer.wait_closed()
-                return new_ip
-        except Exception:
-            _LOGGER.debug("Connection test via MAC %s failed", mac)
+#     # 2. Resolve by MAC (fallback)
+#     if mac:
+#         try:
+#             new_ip = await resolve_ip_by_mac(hass, mac)
+#             if new_ip:
+#                 _LOGGER.warning("Resolved new IP %s for MAC %s", new_ip, mac)
+#                 reader, writer = await asyncio.wait_for(
+#                     asyncio.open_connection(new_ip, PORT), timeout=5
+#                 )
+#                 writer.close()
+#                 await writer.wait_closed()
+#                 return new_ip
+#         except Exception:
+#             _LOGGER.debug("Connection test via MAC %s failed", mac)
 
-    return None
+#     return None
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
@@ -87,13 +88,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     )
 
     host = entry.data.get(CONF_HOST, "")
-    mac = entry.data.get(CONF_MAC, "").upper()
+    mac = format_mac(entry.data.get(CONF_MAC, ""))
 
     # -----------------------
     # 1. Check connection
     # -----------------------
     try:
-        reachable_host = await _test_connection(hass, host, mac)
+        reachable_host = await test_connection(hass, host, mac)
     except Exception as err:
         _LOGGER.exception("Unexpected error during pre-setup connection test")
         raise ConfigEntryNotReady from err

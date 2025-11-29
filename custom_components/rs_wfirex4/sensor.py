@@ -23,8 +23,9 @@ from homeassistant.helpers.update_coordinator import (
 )
 
 from .const import DOMAIN, PORT
-from .helpers import build_device_info, resolve_ip_by_mac
+from .helpers import build_default_name_with_mac, build_device_info, resolve_ip_by_mac
 
+_LOGGER = logging.getLogger(__name__)
 CONF_ATTRIBUTION = ""
 
 # Sensor type list
@@ -51,7 +52,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
 
     host = data.get(CONF_HOST)
     mac = format_mac(data.get(CONF_MAC))
-    name = data.get(CONF_NAME, f"WFireX4 {mac}")
+    name = data.get(CONF_NAME, build_default_name_with_mac(mac))
 
     temp_offset = opts.get("temp_offset", data.get("temp_offset", 0.0))
     humi_offset = opts.get("humi_offset", data.get("humi_offset", 0.0))
@@ -100,7 +101,7 @@ async def async_update_entry_host(hass, entry, new_host: str):
 
 # ----------------------------------------------------------------------
 # Coordinator-based Sensor Entity
-class WfirexCoordinatorSensor(CoordinatorEntity, SensorEntity):
+class WfirexCoordinatorSensor(CoordinatorEntity, SensorEntity):  # pyright: ignore[reportIncompatibleVariableOverride]
     """Representation of a WFIREX4 sensor managed via DataUpdateCoordinator."""
 
     def __init__(
@@ -138,7 +139,7 @@ class WfirexCoordinatorSensor(CoordinatorEntity, SensorEntity):
         self._attr_extra_state_attributes = {ATTR_ATTRIBUTION: CONF_ATTRIBUTION}
 
     @property
-    def native_value(self) -> int | float | None:
+    def native_value(self) -> int | float | None:  # pyright: ignore[reportIncompatibleVariableOverride]
         """Return the latest sensor value from the coordinator."""
         data = self.coordinator.data
         if not data:
@@ -234,7 +235,8 @@ class Wfirex4Fetcher:
                 self.data["reliability"] = int(round(acti / 255.0 * 100.0))
                 return self.data
             else:
-                raise UpdateFailed("Sensor fetch error.")
+                _LOGGER.warning("Sensor fetch error.")
+                return None
 
     async def _update_entry_host(self, new_host: str):
         """ConfigEntry 内の host(IP) を更新"""
