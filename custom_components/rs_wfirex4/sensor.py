@@ -6,6 +6,7 @@ import time
 from datetime import timedelta
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
+from homeassistant.components.sensor.const import SensorStateClass
 from homeassistant.const import (
     ATTR_ATTRIBUTION,
     CONF_HOST,
@@ -34,10 +35,21 @@ SENSOR_TYPES = {
         "Temperature",
         UnitOfTemperature.CELSIUS,
         SensorDeviceClass.TEMPERATURE,
+        SensorStateClass.MEASUREMENT,
     ),
-    "humidity": ("Humidity", PERCENTAGE, SensorDeviceClass.HUMIDITY),
-    "light": ("Light", LIGHT_LUX, SensorDeviceClass.ILLUMINANCE),
-    "reliability": ("Reliability", PERCENTAGE, SensorDeviceClass.POWER_FACTOR),
+    "humidity": (
+        "Humidity",
+        PERCENTAGE,
+        SensorDeviceClass.HUMIDITY,
+        SensorStateClass.MEASUREMENT,
+    ),
+    "light": (
+        "Light",
+        LIGHT_LUX,
+        SensorDeviceClass.ILLUMINANCE,
+        SensorStateClass.MEASUREMENT,
+    ),
+    "reliability": ("Reliability", PERCENTAGE, SensorDeviceClass.POWER_FACTOR, None),
 }
 
 _LOGGER = logging.getLogger(__name__)
@@ -136,6 +148,7 @@ class WfirexCoordinatorSensor(CoordinatorEntity, SensorEntity):  # pyright: igno
         # Sensor metadata
         self._attr_native_unit_of_measurement = SENSOR_TYPES[self.type][1]
         self._attr_device_class = SENSOR_TYPES[self.type][2]
+        self._attr_state_class = SENSOR_TYPES[self.type][3]
         self._attr_extra_state_attributes = {ATTR_ATTRIBUTION: CONF_ATTRIBUTION}
 
     @property
