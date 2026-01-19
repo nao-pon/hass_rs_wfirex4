@@ -69,11 +69,13 @@ async def async_setup_entry(hass, entry, async_add_entities):
     temp_offset = opts.get("temp_offset", data.get("temp_offset", 0.0))
     humi_offset = opts.get("humi_offset", data.get("humi_offset", 0.0))
 
-    # Create fetcher
-    scan_interval = opts.get("scan_interval", 60)  # デフォルト60秒
-    fetcher = hass.data[DOMAIN]["fetchers"].get(mac)
-    if not fetcher:
-        fetcher = hass.data[DOMAIN]["fetchers"][mac] = Wfirex4Fetcher(
+    # Coordinator is prepared in __init__.py BEFORE async_forward_entry_setups().
+    # Keep platform setup lightweight and avoid raising ConfigEntryNotReady here.
+    coordinator = hass.data[DOMAIN]["coordinators"].get(mac)
+    if coordinator is None:
+        # Fallback (should not happen): create a coordinator without doing a first refresh here.
+        scan_interval = opts.get("scan_interval", 60)
+        fetcher = hass.data[DOMAIN]["fetchers"].get(mac) or Wfirex4Fetcher(
             host,
             mac,
             temp_offset,
@@ -82,18 +84,14 @@ async def async_setup_entry(hass, entry, async_add_entities):
             entry,
             hass,
         )
-
-    coordinator = hass.data[DOMAIN]["coordinators"].get(mac)
-    if not coordinator:
+        hass.data[DOMAIN]["fetchers"].setdefault(mac, fetcher)
         coordinator = hass.data[DOMAIN]["coordinators"][mac] = DataUpdateCoordinator(
             hass,
             _LOGGER,
             name=name,
-            update_interval=timedelta(seconds=scan_interval),  # Coordinator更新間隔
+            update_interval=timedelta(seconds=scan_interval),
             update_method=fetcher.get_sensor_data,
         )
-
-    await coordinator.async_config_entry_first_refresh()
 
     # Create entities (replace with actual entities from project)
     entities = []
@@ -186,6 +184,24 @@ class Wfirex4Fetcher:
         self._entry = entry
         self.hass = hass
 
+    def apply_config(
+        self,
+        *,
+        host: str,
+        temp_offset: float,
+        humi_offset: float,
+        scan_interval: int,
+        entry,
+        hass,
+    ) -> None:
+        """Apply updated config/option values to an existing fetcher instance."""
+        self._host = host
+        self._temp_offset = temp_offset
+        self._humi_offset = humi_offset
+        self._scan_interval = scan_interval
+        self._entry = entry
+        self.hass = hass
+
     async def get_sensor_data(self):
         async with self._lock:
             now = time.monotonic()
@@ -248,8 +264,7 @@ class Wfirex4Fetcher:
                 self.data["reliability"] = int(round(acti / 255.0 * 100.0))
                 return self.data
             else:
-                _LOGGER.warning("Sensor fetch error.")
-                return None
+                raise UpdateFailed("Sensor fetch error: invalid response")
 
     async def _update_entry_host(self, new_host: str):
         """ConfigEntry 内の host(IP) を更新"""

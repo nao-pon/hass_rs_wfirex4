@@ -2,17 +2,19 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
+from datetime import timedelta
 
 from homeassistant.config_entries import SOURCE_IMPORT, ConfigEntry
 from homeassistant.const import CONF_HOST, CONF_MAC
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers.device_registry import format_mac
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
-from .const import DOMAIN, PORT
-from .helpers import resolve_ip_by_mac, test_connection
+from .const import DOMAIN
+from .helpers import test_connection
+from .sensor import Wfirex4Fetcher
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -34,46 +36,6 @@ async def async_setup(hass: HomeAssistant, config: dict):
         )
 
     return True
-
-
-# async def _test_connection(hass: HomeAssistant, host: str, mac: str) -> str | None:
-#     """
-#     Try connecting to host:60001.
-#     If fails, attempt resolve_ip_by_mac and return new IP if successful.
-#     Return:
-#       - host (str): confirmed reachable host
-#       - new_host (str): resolved IP when host=NG but MAC=OK
-#       - None → connection failed completely
-#     """
-
-#     # 1. First try configured host
-#     if host:
-#         try:
-#             _, writer = await asyncio.wait_for(
-#                 asyncio.open_connection(host, PORT), timeout=5
-#             )
-#             writer.close()
-#             await writer.wait_closed()
-#             return host
-#         except Exception:
-#             _LOGGER.debug("Connection test failed for %s", host)
-
-#     # 2. Resolve by MAC (fallback)
-#     if mac:
-#         try:
-#             new_ip = await resolve_ip_by_mac(hass, mac)
-#             if new_ip:
-#                 _LOGGER.warning("Resolved new IP %s for MAC %s", new_ip, mac)
-#                 reader, writer = await asyncio.wait_for(
-#                     asyncio.open_connection(new_ip, PORT), timeout=5
-#                 )
-#                 writer.close()
-#                 await writer.wait_closed()
-#                 return new_ip
-#         except Exception:
-#             _LOGGER.debug("Connection test via MAC %s failed", mac)
-
-#     return None
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
@@ -112,11 +74,67 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
         host = reachable_host
         _LOGGER.info("Updated host for %s to %s", entry.entry_id, host)
 
-    # -----------------------
-    # 3. forward to platform
-    # -----------------------
-    hass.data[DOMAIN][entry.entry_id] = entry.data
+    # Save entry data for platforms (remote/sensor).
+    # Use the latest host value so platforms (especially remote) don't use stale IP.
+    hass.data[DOMAIN][entry.entry_id] = {**entry.data, CONF_HOST: host}
 
+    # -----------------------
+    # 3. Prepare sensor coordinator (BEFORE forwarding platforms)
+    # -----------------------
+    # NOTE: remote platform does not require fetcher/coordinator, but sensor does.
+    if "sensor" in PLATFORMS:
+        opts = entry.options
+
+        scan_interval = opts.get("scan_interval", 60)
+        temp_offset = opts.get("temp_offset", entry.data.get("temp_offset", 0.0))
+        humi_offset = opts.get("humi_offset", entry.data.get("humi_offset", 0.0))
+
+        fetcher = hass.data[DOMAIN]["fetchers"].get(mac)
+        if not fetcher:
+            fetcher = hass.data[DOMAIN]["fetchers"][mac] = Wfirex4Fetcher(
+                host,
+                mac,
+                temp_offset,
+                humi_offset,
+                scan_interval,
+                entry,
+                hass,
+            )
+        else:
+            # Update existing fetcher with latest config
+            fetcher.apply_config(
+                host=host,
+                temp_offset=temp_offset,
+                humi_offset=humi_offset,
+                scan_interval=scan_interval,
+                entry=entry,
+                hass=hass,
+            )
+
+        coordinator = hass.data[DOMAIN]["coordinators"].get(mac)
+        if not coordinator:
+            coordinator = hass.data[DOMAIN]["coordinators"][mac] = (
+                DataUpdateCoordinator(
+                    hass,
+                    _LOGGER,
+                    name=entry.title or mac,
+                    update_interval=timedelta(seconds=scan_interval),
+                    update_method=fetcher.get_sensor_data,
+                )
+            )
+        else:
+            coordinator.update_interval = timedelta(seconds=scan_interval)
+
+        # IMPORTANT: If first refresh fails, raise ConfigEntryNotReady HERE
+        # (before async_forward_entry_setups), otherwise HA will warn.
+        try:
+            await coordinator.async_config_entry_first_refresh()
+        except Exception as err:
+            raise ConfigEntryNotReady from err
+
+    # -----------------------
+    # 4. Forward platforms
+    # -----------------------
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
 
