@@ -31,8 +31,8 @@ _LOGGER = logging.getLogger(__name__)
 CONF_ATTRIBUTION = ""
 
 # ---- Tuning knobs ----
-CONNECT_TIMEOUT = 4.0  # Intentionally short; on a LAN, ~3–6s is usually sufficient.
-READ_TIMEOUT = 4.0  # Response wait time; on a LAN, ~3–8s is typical.
+CONNECT_TIMEOUT = 4.0  # Intentionally short; on a LAN, ~3-6s is usually sufficient.
+READ_TIMEOUT = 4.0  # Response wait time; on a LAN, ~3-8s is typical.
 MAX_ATTEMPTS = 3  # First try + two retries.
 BACKOFF_BASE = 0.5  # 0.5s, 1.0s, 2.0s...
 BACKOFF_CAP = 2.0  # Cap the backoff to avoid waiting too long.
@@ -239,8 +239,13 @@ class Wfirex4Fetcher:
                 try:
                     writer.close()
                     await writer.wait_closed()
-                except Exception:
-                    pass
+                except Exception as err:
+                    _LOGGER.debug(
+                        "Error closing WFIREX4 connection to %s:%s: %s",
+                        host,
+                        self._port,
+                        err,
+                    )
 
     async def get_sensor_data(self):
         async with self._lock:
@@ -266,11 +271,9 @@ class Wfirex4Fetcher:
                         acti = int.from_bytes(data[11:12], byteorder="big")
 
                         self.data["temperature"] = temp / 10 + self._temp_offset
-                        self.data["humidity"] = int(
-                            round(humi / 10 + self._humi_offset)
-                        )
+                        self.data["humidity"] = round(humi / 10 + self._humi_offset)
                         self.data["light"] = illu
-                        self.data["reliability"] = int(round(acti / 255.0 * 100.0))
+                        self.data["reliability"] = round(acti / 255.0 * 100.0)
                         return self.data
 
                     raise UpdateFailed(f"Invalid/short response (len={len(data)})")
