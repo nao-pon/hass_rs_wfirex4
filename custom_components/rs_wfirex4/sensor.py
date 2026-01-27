@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
 import time
 from datetime import timedelta
 
@@ -28,6 +29,15 @@ from .helpers import build_default_name_with_mac, build_device_info, resolve_ip_
 
 _LOGGER = logging.getLogger(__name__)
 CONF_ATTRIBUTION = ""
+
+# ---- Tuning knobs ----
+CONNECT_TIMEOUT = 4.0  # Intentionally short; on a LAN, ~3-6s is usually sufficient.
+READ_TIMEOUT = 4.0  # Response wait time; on a LAN, ~3-8s is typical.
+MAX_ATTEMPTS = 3  # First try + two retries.
+BACKOFF_BASE = 0.5  # 0.5s, 1.0s, 2.0s...
+BACKOFF_CAP = 2.0  # Cap the backoff to avoid waiting too long.
+JITTER = 0.2  # Small random jitter to avoid synchronized retries.
+MIN_LEN = 12  # Minimum response length required (we parse up to data[11]).
 
 # Sensor type list
 SENSOR_TYPES = {
@@ -70,10 +80,10 @@ async def async_setup_entry(hass, entry, async_add_entities):
     humi_offset = opts.get("humi_offset", data.get("humi_offset", 0.0))
 
     # Coordinator is prepared in __init__.py BEFORE async_forward_entry_setups().
-    # Keep platform setup lightweight and avoid raising ConfigEntryNotReady here.
+    # Keep platform setup lightweight; avoid raising ConfigEntryNotReady here.
     coordinator = hass.data[DOMAIN]["coordinators"].get(mac)
     if coordinator is None:
-        # Fallback (should not happen): create a coordinator without doing a first refresh here.
+        # Fallback (should be rare): create a coordinator without forcing a first refresh here.
         scan_interval = opts.get("scan_interval", 60)
         fetcher = hass.data[DOMAIN]["fetchers"].get(mac) or Wfirex4Fetcher(
             host,
@@ -93,7 +103,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
             update_method=fetcher.get_sensor_data,
         )
 
-    # Create entities (replace with actual entities from project)
+    # Create entities for each exposed sensor type.
     entities = []
     for sensor_type in SENSOR_TYPES.keys():
         entities.append(WfirexCoordinatorSensor(coordinator, mac, name, sensor_type))
@@ -101,7 +111,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
 
 
 async def async_update_entry_host(hass, entry, new_host: str):
-    """ConfigEntry 内の host(IP) を更新"""
+    """Update the stored host (IP address) in the ConfigEntry."""
     if entry.data.get("host") != new_host:
         hass.config_entries.async_update_entry(
             entry, data={**entry.data, "host": new_host}
@@ -159,8 +169,7 @@ class WfirexCoordinatorSensor(CoordinatorEntity, SensorEntity):  # pyright: igno
 
 
 # ----------------------------------------------------------------------
-# Fetcher with 60-second throttle
-# Fetcher
+# Fetcher (rate-limited by scan_interval)
 class Wfirex4Fetcher:
     def __init__(
         self,
@@ -202,72 +211,114 @@ class Wfirex4Fetcher:
         self._entry = entry
         self.hass = hass
 
+    async def _fetch_once(self, host: str) -> bytes:
+        """Open a TCP connection, send a request, read the minimum response, then close."""
+        reader = writer = None
+        try:
+            reader, writer = await asyncio.wait_for(
+                asyncio.open_connection(host, self._port),
+                timeout=CONNECT_TIMEOUT,
+            )
+
+            # Send a request frame.
+            writer.write(b"\xaa\x00\x01\x18\x50")
+            await writer.drain()
+
+            # Read only what we need; the device may keep the connection open.
+            data = b""
+            while len(data) < MIN_LEN:
+                chunk = await asyncio.wait_for(reader.read(1024), timeout=READ_TIMEOUT)
+                if not chunk:
+                    break
+                data += chunk
+
+            return data
+
+        finally:
+            if writer is not None:
+                try:
+                    writer.close()
+                    await writer.wait_closed()
+                except Exception as err:
+                    _LOGGER.debug(
+                        "Error closing WFIREX4 connection to %s:%s: %s",
+                        host,
+                        self._port,
+                        err,
+                    )
+
     async def get_sensor_data(self):
         async with self._lock:
             now = time.monotonic()
             if now - self._last_fetch_time < self._scan_interval:
                 return self.data
 
+            # Record the attempt time. Even on failure, wait scan_interval to avoid hammering the device.
             self._last_fetch_time = now
+
             host_to_connect = self._host
+            last_err = None
+            tried_resolve = False
 
-            try:
-                reader, writer = await asyncio.wait_for(
-                    asyncio.open_connection(host_to_connect, self._port), timeout=10
-                )
-            except Exception:
-                # HA 内部デバイスレジストリから IP 再取得
-                resolved_ip = await resolve_ip_by_mac(self.hass, self._mac)
-                if resolved_ip:
-                    host_to_connect = resolved_ip
-                    try:
-                        reader, writer = await asyncio.wait_for(
-                            asyncio.open_connection(host_to_connect, self._port),
-                            timeout=10,
-                        )
-                        # 成功したら config entry も更新
-                        if self._entry and self.hass:
-                            await self._update_entry_host(resolved_ip)
-                        self._host = resolved_ip
-                    except Exception as err2:
-                        raise UpdateFailed(
-                            f"Failed to fetch sensor data after resolving IP: {err2}"
-                        )
-                else:
-                    raise UpdateFailed(
-                        f"Cannot resolve IP for MAC {self._mac}, device not known in HA"
-                    )
+            for attempt in range(1, MAX_ATTEMPTS + 1):
+                try:
+                    data = await self._fetch_once(host_to_connect)
 
-            # デバイスからデータ取得
-            writer.write(b"\xaa\x00\x01\x18\x50")
-            await writer.drain()
+                    if len(data) >= MIN_LEN and data[0:1] == b"\xaa":
+                        humi = int.from_bytes(data[5:7], byteorder="big")
+                        temp = int.from_bytes(data[7:9], byteorder="big")
+                        illu = int.from_bytes(data[9:11], byteorder="big")
+                        acti = int.from_bytes(data[11:12], byteorder="big")
 
-            data = b""
-            while True:
-                msg = await reader.read(1024)
-                if not msg:
-                    break
-                data += msg
+                        self.data["temperature"] = temp / 10 + self._temp_offset
+                        self.data["humidity"] = round(humi / 10 + self._humi_offset)
+                        self.data["light"] = illu
+                        self.data["reliability"] = round(acti / 255.0 * 100.0)
+                        return self.data
 
-            writer.close()
-            await writer.wait_closed()
+                    raise UpdateFailed(f"Invalid/short response (len={len(data)})")
 
-            if data and data[0:1] == b"\xaa":
-                humi = int.from_bytes(data[5:7], byteorder="big")
-                temp = int.from_bytes(data[7:9], byteorder="big")
-                illu = int.from_bytes(data[9:11], byteorder="big")
-                acti = int.from_bytes(data[11:12], byteorder="big")
+                except asyncio.CancelledError:
+                    # HA may cancel during shutdown or startup timeouts; do not swallow cancellation.
+                    raise
 
-                self.data["temperature"] = temp / 10 + self._temp_offset
-                self.data["humidity"] = int(round(humi / 10 + self._humi_offset))
-                self.data["light"] = illu
-                self.data["reliability"] = int(round(acti / 255.0 * 100.0))
-                return self.data
-            else:
-                raise UpdateFailed("Sensor fetch error: invalid response")
+                except Exception as err:
+                    last_err = err
+
+                    # On the first failure only, try resolving a new IP from the MAC (handles IP changes elsewhere).
+                    if not tried_resolve:
+                        tried_resolve = True
+                        try:
+                            resolved_ip = await resolve_ip_by_mac(self.hass, self._mac)
+                        except Exception:
+                            resolved_ip = None
+
+                        if resolved_ip and resolved_ip != host_to_connect:
+                            host_to_connect = resolved_ip
+                            # If successful, persist the resolved IP back into the config entry.
+                            if self._entry and self.hass:
+                                try:
+                                    await self._update_entry_host(resolved_ip)
+                                except Exception:
+                                    pass
+                            self._host = resolved_ip
+                            # Retry immediately (no backoff) after switching to a new IP.
+                            continue
+
+                    # Light exponential backoff (+jitter) before the next retry.
+                    if attempt < MAX_ATTEMPTS:
+                        delay = min(BACKOFF_BASE * (2 ** (attempt - 1)), BACKOFF_CAP)
+                        delay += random.uniform(0, JITTER)
+                        await asyncio.sleep(delay)
+
+            # All attempts exhausted.
+            raise UpdateFailed(
+                f"Failed to fetch sensor data from {host_to_connect}:{self._port} "
+                f"after {MAX_ATTEMPTS} attempts. Last error: {last_err}"
+            )
 
     async def _update_entry_host(self, new_host: str):
-        """ConfigEntry 内の host(IP) を更新"""
+        """Update the stored host (IP address) in the ConfigEntry."""
         if self._entry.data.get("host") != new_host:
             self.hass.config_entries.async_update_entry(
                 self._entry, data={**self._entry.data, "host": new_host}
